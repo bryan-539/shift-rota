@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1">
+<title>Shift Rota</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  :root{
+    --bg:#1B1E26; --surface:#242833; --surface-alt:#2D323F; --border:#3A3F4D;
+    --text:#F2EFE9; --text-dim:#9BA3B0; --amber:#F2A93B; --amber-dim:#6B5530;
+    --teal:#43C6AC; --danger:#E2574C;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;-webkit-font-smoothing:antialiased;}
+  .wrap{max-width:680px;margin:0 auto;padding:20px 16px 60px;}
+  .eyebrow{font-family:'Oswald',sans-serif;font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--amber);margin:0 0 6px;}
+  h1{font-family:'Oswald',sans-serif;font-size:26px;font-weight:600;letter-spacing:.01em;margin:0 0 6px;text-transform:uppercase;}
+  .sub{color:var(--text-dim);font-size:14px;margin:0;line-height:1.5;}
+  section{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:16px;}
+  .sec-title{font-family:'Oswald',sans-serif;font-size:13px;letter-spacing:.1em;text-transform:uppercase;color:var(--text-dim);margin:0 0 12px;}
+  label{font-size:12px;color:var(--text-dim);display:block;margin-bottom:4px;}
+  input[type=text], input[type=time], input[type=date], input[type=email], input[type=password], select{
+    background:var(--surface-alt);border:1px solid var(--border);color:var(--text);border-radius:7px;
+    padding:9px 10px;font-size:14px;font-family:inherit;width:100%;
+  }
+  input[type=color]{width:48px;height:38px;padding:2px;border-radius:7px;border:1px solid var(--border);background:var(--surface-alt);}
+  input:focus, select:focus{outline:2px solid var(--amber);outline-offset:1px;}
+  .row{display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;}
+  .row > div{flex:1;min-width:90px;}
+  .btn{background:var(--amber);color:#1B1E26;border:none;border-radius:7px;padding:10px 16px;font-weight:600;font-size:14px;cursor:pointer;font-family:inherit;}
+  .btn:active{transform:translateY(1px);}
+  .btn.secondary{background:transparent;color:var(--text);border:1px solid var(--border);}
+  .btn.full{width:100%;}
+  .btn.danger{background:var(--danger);color:#1B1E26;}
+  .chip-list{display:flex;flex-wrap:wrap;gap:8px;margin-top:4px;}
+  .chip{display:flex;align-items:center;gap:8px;border-radius:7px;padding:7px 10px;font-size:13px;font-weight:600;color:#1B1E26;}
+  .chip button{background:rgba(0,0,0,.18);border:none;color:#1B1E26;width:18px;height:18px;border-radius:50%;cursor:pointer;font-size:12px;line-height:1;display:flex;align-items:center;justify-content:center;}
+  .checkbox-row{display:flex;align-items:center;gap:7px;margin-bottom:10px;}
+  .checkbox-row input{width:auto;}
+  .checkbox-row label{margin:0;color:var(--text);font-size:13px;}
+  .grid{display:grid;grid-template-columns:repeat(7,1fr);gap:6px;}
+  .day-label{font-size:10px;color:var(--text-dim);text-align:center;text-transform:uppercase;letter-spacing:.05em;}
+  .week-marker{grid-column:1/-1;font-family:'Oswald',sans-serif;font-size:11px;letter-spacing:.1em;color:var(--text-dim);margin-top:8px;text-transform:uppercase;}
+  .day-cell select{width:100%;padding:8px 4px;font-size:11px;text-align:center;border-radius:6px;font-weight:600;appearance:none;-webkit-appearance:none;}
+  .help{font-size:12px;color:var(--text-dim);line-height:1.5;margin-top:10px;}
+  .status{font-size:12px;min-height:16px;margin-top:8px;}
+  .empty{color:var(--text-dim);font-size:13px;}
+
+  /* Auth screen */
+  #auth-screen{max-width:380px;margin:60px auto 0;padding:0 16px;}
+  #auth-screen .toggle-row{display:flex;gap:8px;margin-top:14px;justify-content:center;font-size:13px;color:var(--text-dim);}
+  #auth-screen .toggle-row a{color:var(--amber);cursor:pointer;text-decoration:underline;}
+
+  /* Top nav */
+  #app-screen{display:none;}
+  .topbar{display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid var(--border);}
+  .topbar .brand{font-family:'Oswald',sans-serif;font-weight:600;letter-spacing:.05em;text-transform:uppercase;font-size:15px;}
+  .topbar .email{font-size:12px;color:var(--text-dim);}
+  .tabbar{display:flex;overflow-x:auto;border-bottom:1px solid var(--border);background:var(--surface);}
+  .tabbar button{
+    flex:1; min-width:110px; background:none;border:none;color:var(--text-dim);
+    font-family:inherit;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.03em;
+    padding:13px 8px;cursor:pointer;border-bottom:3px solid transparent;white-space:nowrap;
+  }
+  .tabbar button.active{color:var(--amber);border-bottom-color:var(--amber);}
+  .tab-panel{display:none;}
+  .tab-panel.active{display:block;}
+  .coming-soon{padding:60px 16px;text-align:center;color:var(--text-dim);}
+  .coming-soon .eyebrow{display:block;}
+</style>
+</head>
+<body>
+
+<!-- AUTH SCREEN -->
+<div id="auth-screen">
+  <p class="eyebrow">Shift Rota</p>
+  <h1 id="auth-title">Log in</h1>
+  <p class="sub" style="margin-bottom:16px;">Your rota, holidays and pay, saved to your account — open it from any device.</p>
+  <section>
+    <div class="row"><div><label>Email</label><input type="email" id="auth-email" autocomplete="email"></div></div>
+    <div class="row"><div><label>Password</label><input type="password" id="auth-password" autocomplete="current-password"></div></div>
+    <button class="btn full" id="auth-submit-btn" onclick="submitAuth()">Log in</button>
+    <div class="status" id="auth-status"></div>
+    <div class="toggle-row" id="auth-toggle">
+      Don't have an account? <a onclick="toggleAuthMode()">Sign up</a>
+    </div>
+  </section>
+</div>
+
+<!-- MAIN APP -->
+<div id="app-screen">
+  <div class="topbar">
+    <span class="brand">Shift Rota</span>
+    <span>
+      <span class="email" id="user-email"></span>
+      <button class="btn secondary" style="padding:6px 10px;font-size:12px;margin-left:8px;" onclick="logout()">Log out</button>
+    </span>
+  </div>
+  <div class="tabbar">
+    <button class="tab-btn active" data-tab="calendar" onclick="switchTab('calendar')">My Calendar</button>
+    <button class="tab-btn" data-tab="original" onclick="switchTab('original')">Original Rota</button>
+    <button class="tab-btn" data-tab="friends" onclick="switchTab('friends')">Friends</button>
+    <button class="tab-btn" data-tab="templates" onclick="switchTab('templates')">Templates</button>
+    <button class="tab-btn" data-tab="account" onclick="switchTab('account')">Account &amp; Setup</button>
+  </div>
+
+  <div class="wrap">
+    <div class="tab-panel" id="tab-calendar">
+      <div class="coming-soon"><span class="eyebrow">Coming soon</span>My Calendar — your live view with holidays, swaps and bank holidays highlighted.</div>
+    </div>
+    <div class="tab-panel" id="tab-original">
+      <div class="coming-soon"><span class="eyebrow">Coming soon</span>Original Rota — your contracted pattern, with booked holidays listed separately.</div>
+    </div>
+    <div class="tab-panel" id="tab-friends">
+      <div class="coming-soon"><span class="eyebrow">Coming soon</span>Friends — search, add, and view their updated rota side-by-side with yours.</div>
+    </div>
+    <div class="tab-panel" id="tab-templates">
+      <div class="coming-soon"><span class="eyebrow">Coming soon</span>Templates — a shared library of shift types anyone can use.</div>
+    </div>
+
+    <div class="tab-panel active" id="tab-account">
+      <header style="margin-bottom:16px;">
+        <p class="eyebrow">Account &amp; Setup</p>
+        <h1>Your original rota</h1>
+        <p class="sub">Set this up once — it's the contracted pattern your workplace gave you, before any holidays or swaps. Only come back here if your whole contract changes.</p>
+      </header>
+
+      <section>
+        <p class="sec-title">1 · Your shift types</p>
+        <div class="row">
+          <div><label>Name</label><input type="text" id="st-name" placeholder="e.g. Early, Late, Night"></div>
+          <div style="flex:0 0 60px;"><label>Colour</label><input type="color" id="st-color" value="#F2A93B"></div>
+        </div>
+        <div class="checkbox-row">
+          <input type="checkbox" id="st-allday">
+          <label for="st-allday">No fixed time (all-day / flexible)</label>
+        </div>
+        <div class="row" id="st-time-row">
+          <div><label>Start time</label><input type="time" id="st-start" value="09:00"></div>
+          <div><label>End time</label><input type="time" id="st-end" value="17:00"></div>
+        </div>
+        <div class="row">
+          <div><label>Paid hours (HH:MM)</label><input type="text" id="st-paid" placeholder="e.g. 08:43"></div>
+        </div>
+        <div class="row">
+          <div><label>Default description (shown in calendar exports)</label><input type="text" id="st-desc" placeholder="optional, e.g. Route 42"></div>
+        </div>
+        <button class="btn full" onclick="addShiftType()">Add shift type</button>
+        <div class="status" id="st-status"></div>
+        <div class="chip-list" id="shift-type-list"></div>
+
+        <div id="template-section" style="margin-top:16px;display:none;">
+          <p class="help" style="margin-top:0;">Shared templates — add one of these to your list instead of typing it from scratch:</p>
+          <div class="chip-list" id="template-list"></div>
+        </div>
+      </section>
+
+      <section>
+        <p class="sec-title">2 · Your 5-week pattern</p>
+        <p class="help" style="margin-top:0;margin-bottom:12px;">Day 1 of Week 1 lines up with the date you set below. Pick a shift for each day — leave as "—" for a rest day.</p>
+        <div id="pattern-grid"></div>
+      </section>
+
+      <section>
+        <p class="sec-title">3 · Rota start date</p>
+        <p class="help" style="margin-top:0;">The real calendar date that lines up with Day 1, Week 1 above.</p>
+        <input type="date" id="rota-start">
+      </section>
+
+      <button class="btn full" onclick="saveOriginalRota()">Save my original rota</button>
+      <div class="status" id="save-status"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const SUPABASE_URL = 'https://ewmrruqpkvifhakqxaip.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_jHVT3it7bhuvvvxSEnjpTQ_9f8vsned';
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+const DAY_LABELS = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+let currentUser = null;
+let shiftTypes = [];     // personal shift types
+let templates = [];      // admin templates (is_template = true)
+let pattern = Array(35).fill('');
+let rotaStart = '';
+let isSignup = false;
+
+// ---------- AUTH ----------
+function toggleAuthMode(){
+  isSignup = !isSignup;
+  document.getElementById('auth-title').textContent = isSignup ? 'Sign up' : 'Log in';
+  document.getElementById('auth-submit-btn').textContent = isSignup ? 'Sign up' : 'Log in';
+  document.getElementById('auth-toggle').innerHTML = isSignup
+    ? 'Already have an account? <a onclick="toggleAuthMode()">Log in</a>'
+    : "Don't have an account? <a onclick=\"toggleAuthMode()\">Sign up</a>";
+  document.getElementById('auth-status').textContent = '';
+}
+
+async function submitAuth(){
+  const email = document.getElementById('auth-email').value.trim();
+  const password = document.getElementById('auth-password').value;
+  const statusEl = document.getElementById('auth-status');
+  if(!email || !password){
+    statusEl.style.color = 'var(--danger)';
+    statusEl.textContent = 'Enter both an email and a password.';
+    return;
+  }
+  statusEl.style.color = 'var(--text-dim)';
+  statusEl.textContent = isSignup ? 'Signing up…' : 'Logging in…';
+  try{
+    let result;
+    if(isSignup){
+      result = await sb.auth.signUp({ email, password });
+    } else {
+      result = await sb.auth.signInWithPassword({ email, password });
+    }
+    if(result.error) throw result.error;
+    if(isSignup && !result.data.session){
+      statusEl.style.color = 'var(--teal)';
+      statusEl.textContent = 'Account created — check your email to confirm, then log in.';
+      return;
+    }
+    await onLoggedIn(result.data.session.user);
+  }catch(e){
+    statusEl.style.color = 'var(--danger)';
+    statusEl.textContent = e.message || 'Something went wrong.';
+  }
+}
+
+async function logout(){
+  await sb.auth.signOut();
+  currentUser = null;
+  document.getElementById('app-screen').style.display = 'none';
+  document.getElementById('auth-screen').style.display = 'block';
+}
+
+async function onLoggedIn(user){
+  currentUser = user;
+  document.getElementById('auth-screen').style.display = 'none';
+  document.getElementById('app-screen').style.display = 'block';
+  document.getElementById('user-email').textContent = user.email;
+  await loadAccountData();
+}
+
+async function checkExistingSession(){
+  const { data } = await sb.auth.getSession();
+  if(data && data.session && data.session.user){
+    await onLoggedIn(data.session.user);
+  }
+}
+
+// ---------- TABS ----------
+function switchTab(tab){
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.id === 'tab-' + tab));
+}
+
+// ---------- ACCOUNT & SETUP TAB ----------
+document.getElementById('st-allday').addEventListener('change', (e)=>{
+  document.getElementById('st-time-row').style.display = e.target.checked ? 'none' : 'flex';
+});
+
+async function loadAccountData(){
+  const [stRes, tplRes, rotaRes] = await Promise.all([
+    sb.from('shift_types').select('*').eq('owner_id', currentUser.id),
+    sb.from('shift_types').select('*').eq('is_template', true),
+    sb.from('rota_settings').select('*').eq('user_id', currentUser.id).maybeSingle()
+  ]);
+  shiftTypes = stRes.data || [];
+  templates = tplRes.data || [];
+  if(rotaRes.data){
+    rotaStart = rotaRes.data.rota_start || '';
+    pattern = rotaRes.data.original_pattern || Array(35).fill('');
+  } else {
+    rotaStart = '';
+    pattern = Array(35).fill('');
+  }
+  document.getElementById('rota-start').value = rotaStart;
+  renderShiftTypeList();
+  renderTemplateList();
+  renderGrid();
+}
+
+async function addShiftType(){
+  const name = document.getElementById('st-name').value.trim();
+  if(!name) return;
+  const statusEl = document.getElementById('st-status');
+  const allDay = document.getElementById('st-allday').checked;
+  const start = document.getElementById('st-start').value;
+  const end = document.getElementById('st-end').value;
+  const paidHours = document.getElementById('st-paid').value.trim();
+  const description = document.getElementById('st-desc').value.trim();
+  const color = document.getElementById('st-color').value;
+
+  const { data, error } = await sb.from('shift_types').insert({
+    owner_id: currentUser.id, is_template: false, name,
+    all_day: allDay, start_time: start, end_time: end,
+    paid_hours: paidHours, description, color
+  }).select().single();
+
+  if(error){
+    statusEl.style.color = 'var(--danger)';
+    statusEl.textContent = error.message;
+    return;
+  }
+  shiftTypes.push(data);
+  document.getElementById('st-name').value = '';
+  document.getElementById('st-paid').value = '';
+  document.getElementById('st-desc').value = '';
+  document.getElementById('st-allday').checked = false;
+  document.getElementById('st-time-row').style.display = 'flex';
+  statusEl.style.color = 'var(--teal)';
+  statusEl.textContent = 'Added.';
+  renderShiftTypeList();
+  renderGrid();
+}
+
+async function removeShiftType(id){
+  await sb.from('shift_types').delete().eq('id', id);
+  shiftTypes = shiftTypes.filter(s => s.id !== id);
+  pattern = pattern.map(p => p === id ? '' : p);
+  renderShiftTypeList();
+  renderGrid();
+}
+
+async function addTemplateToMine(tpl){
+  const { data, error } = await sb.from('shift_types').insert({
+    owner_id: currentUser.id, is_template: false, name: tpl.name,
+    all_day: tpl.all_day, start_time: tpl.start_time, end_time: tpl.end_time,
+    paid_hours: tpl.paid_hours, description: tpl.description, color: tpl.color
+  }).select().single();
+  if(!error){
+    shiftTypes.push(data);
+    renderShiftTypeList();
+    renderGrid();
+  }
+}
+
+function renderShiftTypeList(){
+  const el = document.getElementById('shift-type-list');
+  el.innerHTML = '';
+  if(shiftTypes.length === 0){
+    el.innerHTML = '<p class="empty">No shift types yet — add your first one above.</p>';
+  } else {
+    shiftTypes.forEach(s=>{
+      const div = document.createElement('div');
+      div.className = 'chip';
+      div.style.background = s.color || '#F2A93B';
+      const timeLabel = s.all_day ? 'no fixed time' : (s.start_time + '–' + s.end_time);
+      div.innerHTML = '<span>' + escapeHtml(s.name) + ' · ' + timeLabel + '</span>';
+      const btn = document.createElement('button');
+      btn.textContent = '×';
+      btn.onclick = ()=>removeShiftType(s.id);
+      div.appendChild(btn);
+      el.appendChild(div);
+    });
+  }
+}
+
+function renderTemplateList(){
+  const section = document.getElementById('template-section');
+  const el = document.getElementById('template-list');
+  el.innerHTML = '';
+  if(templates.length === 0){
+    section.style.display = 'none';
+    return;
+  }
+  section.style.display = 'block';
+  templates.forEach(t=>{
+    const div = document.createElement('div');
+    div.className = 'chip';
+    div.style.background = t.color || '#43C6AC';
+    const timeLabel = t.all_day ? 'no fixed time' : (t.start_time + '–' + t.end_time);
+    div.innerHTML = '<span>' + escapeHtml(t.name) + ' · ' + timeLabel + '</span>';
+    const btn = document.createElement('button');
+    btn.textContent = '+';
+    btn.title = 'Add to my shift types';
+    btn.onclick = ()=>addTemplateToMine(t);
+    div.appendChild(btn);
+    el.appendChild(div);
+  });
+}
+
+function renderGrid(){
+  const grid = document.getElementById('pattern-grid');
+  grid.innerHTML = '';
+  grid.className = 'grid';
+  for(let w=0; w<5; w++){
+    const marker = document.createElement('div');
+    marker.className = 'week-marker';
+    marker.textContent = 'Week ' + (w+1);
+    grid.appendChild(marker);
+    DAY_LABELS.forEach(d=>{
+      const lbl = document.createElement('div');
+      lbl.className = 'day-label';
+      lbl.textContent = d;
+      grid.appendChild(lbl);
+    });
+    for(let d=0; d<7; d++){
+      const idx = w*7 + d;
+      const cell = document.createElement('div');
+      const sel = document.createElement('select');
+      sel.dataset.idx = idx;
+      const blankOpt = document.createElement('option');
+      blankOpt.value = '';
+      blankOpt.textContent = '—';
+      sel.appendChild(blankOpt);
+      shiftTypes.forEach(s=>{
+        const opt = document.createElement('option');
+        opt.value = s.id;
+        opt.textContent = s.name;
+        sel.appendChild(opt);
+      });
+      sel.value = pattern[idx] || '';
+      styleSelect(sel);
+      sel.addEventListener('change', ()=>{
+        pattern[idx] = sel.value;
+        styleSelect(sel);
+      });
+      cell.appendChild(sel);
+      grid.appendChild(cell);
+    }
+  }
+}
+
+function styleSelect(sel){
+  const shift = shiftTypes.find(s=>s.id===sel.value);
+  if(shift){
+    sel.style.background = shift.color || '#F2A93B';
+    sel.style.color = '#1B1E26';
+    sel.style.border = 'none';
+  } else {
+    sel.style.background = 'var(--surface-alt)';
+    sel.style.color = 'var(--text-dim)';
+    sel.style.border = '1px solid var(--border)';
+  }
+}
+
+document.getElementById('rota-start').addEventListener('change', (e)=>{
+  rotaStart = e.target.value;
+});
+
+async function saveOriginalRota(){
+  const statusEl = document.getElementById('save-status');
+  if(!rotaStart){
+    statusEl.style.color = 'var(--danger)';
+    statusEl.textContent = 'Set a rota start date first.';
+    return;
+  }
+  statusEl.style.color = 'var(--text-dim)';
+  statusEl.textContent = 'Saving…';
+  const { error } = await sb.from('rota_settings').upsert({
+    user_id: currentUser.id,
+    rota_start: rotaStart,
+    original_pattern: pattern,
+    updated_at: new Date().toISOString()
+  });
+  if(error){
+    statusEl.style.color = 'var(--danger)';
+    statusEl.textContent = error.message;
+    return;
+  }
+  statusEl.style.color = 'var(--teal)';
+  statusEl.textContent = 'Saved — this is your original rota.';
+}
+
+function escapeHtml(str){
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+checkExistingSession();
+</script>
+</body>
+</html>
