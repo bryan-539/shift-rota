@@ -354,6 +354,16 @@
       </header>
 
       <section>
+        <p class="sec-title">Your username</p>
+        <p class="help" style="margin-top:0;">Lets friends search for and add you without needing your email.</p>
+        <div class="row">
+          <div><input type="text" id="username-input" placeholder="e.g. ryanw"></div>
+          <button class="btn secondary" onclick="saveUsername()" style="white-space:nowrap;">Save</button>
+        </div>
+        <div class="status" id="username-status"></div>
+      </section>
+
+      <section>
         <p class="sec-title">1 · Your shift types</p>
         <div class="row">
           <div>
@@ -494,6 +504,11 @@ let profileCache = {}; // id -> profile, for friend display
 let selectedFriend = null; // profile of the friend currently being viewed
 let friendData = { rota: null, overrides: [], shiftTypes: [] };
 
+function friendLabel(p){
+  if(!p) return 'Someone';
+  return p.username ? '@' + p.username : (p.display_name || p.email);
+}
+
 async function loadFriendsTab(){
   const { data } = await sb.from('friendships')
     .select('*')
@@ -502,7 +517,7 @@ async function loadFriendsTab(){
 
   const otherIds = [...new Set(allFriendships.map(f => f.user_a === currentUser.id ? f.user_b : f.user_a))];
   if(otherIds.length > 0){
-    const { data: profs } = await sb.from('profiles').select('id,email,display_name').in('id', otherIds);
+    const { data: profs } = await sb.from('profiles').select('id,email,display_name,username').in('id', otherIds);
     (profs || []).forEach(p => profileCache[p.id] = p);
   }
 
@@ -514,11 +529,35 @@ function otherUserId(f){
   return f.user_a === currentUser.id ? f.user_b : f.user_a;
 }
 
+async function saveUsername(){
+  const statusEl = document.getElementById('username-status');
+  const raw = document.getElementById('username-input').value.trim();
+  const username = raw.toLowerCase().replace(/[^a-z0-9_]/g, '');
+  if(!username){
+    statusEl.style.color = 'var(--danger)';
+    statusEl.textContent = 'Username can only contain letters, numbers, and underscores.';
+    return;
+  }
+  document.getElementById('username-input').value = username;
+  statusEl.style.color = 'var(--text-dim)';
+  statusEl.textContent = 'Saving…';
+  const { error } = await sb.from('profiles').update({ username }).eq('id', currentUser.id);
+  if(error){
+    statusEl.style.color = 'var(--danger)';
+    statusEl.textContent = error.message.includes('duplicate') ? 'That username is already taken.' : error.message;
+    return;
+  }
+  statusEl.style.color = 'var(--teal)';
+  statusEl.textContent = 'Saved.';
+}
+
 async function searchUsers(){
   const term = document.getElementById('friend-search-input').value.trim();
   const resultsEl = document.getElementById('friend-search-results');
   if(!term){ resultsEl.innerHTML = ''; return; }
-  const { data, error } = await sb.from('profiles').select('id,email,display_name').ilike('email', '%' + term + '%').limit(10);
+  const { data, error } = await sb.from('profiles').select('id,email,display_name,username')
+    .or('username.ilike.%' + term + '%,email.ilike.%' + term + '%')
+    .limit(10);
   resultsEl.innerHTML = '';
   if(error){
     resultsEl.innerHTML = '<p class="empty">Search failed: ' + escapeHtml(error.message) + '</p>';
@@ -534,7 +573,7 @@ async function searchUsers(){
     const existing = allFriendships.find(f => otherUserId(f) === p.id);
     const div = document.createElement('div');
     div.className = 'off-item';
-    div.innerHTML = '<span>' + escapeHtml(p.display_name || p.email) + '</span>';
+    div.innerHTML = '<span>' + escapeHtml(p.username ? '@' + p.username : (p.display_name || p.email)) + '</span>';
     if(existing){
       const tag = document.createElement('span');
       tag.style.color = 'var(--text-dim)';
@@ -584,7 +623,7 @@ function renderFriendRequests(){
     const p = profileCache[otherUserId(f)];
     const div = document.createElement('div');
     div.className = 'off-item';
-    div.innerHTML = '<span>' + escapeHtml(p ? (p.display_name || p.email) : 'Someone') + ' wants to be friends</span>';
+    div.innerHTML = '<span>' + escapeHtml(friendLabel(p)) + ' wants to be friends</span>';
     const btnGroup = document.createElement('span');
     const acceptBtn = document.createElement('button');
     acceptBtn.textContent = 'Accept';
@@ -603,7 +642,7 @@ function renderFriendRequests(){
     const p = profileCache[otherUserId(f)];
     const div = document.createElement('div');
     div.className = 'off-item';
-    div.innerHTML = '<span>Waiting for ' + escapeHtml(p ? (p.display_name || p.email) : 'them') + ' to accept</span>';
+    div.innerHTML = '<span>Waiting for ' + escapeHtml(p ? friendLabel(p) : 'them') + ' to accept</span>';
     const cancelBtn = document.createElement('button');
     cancelBtn.textContent = 'Cancel';
     cancelBtn.onclick = ()=>respondToRequest(f.id, 'declined');
@@ -624,7 +663,7 @@ function renderMyFriends(){
     const p = profileCache[otherUserId(f)];
     const div = document.createElement('div');
     div.className = 'off-item';
-    div.innerHTML = '<span>' + escapeHtml(p ? (p.display_name || p.email) : 'Friend') + '</span>';
+    div.innerHTML = '<span>' + escapeHtml(p ? friendLabel(p) : 'Friend') + '</span>';
     const btn = document.createElement('button');
     btn.textContent = 'View rota';
     btn.style.color = 'var(--teal)';
@@ -638,7 +677,7 @@ async function selectFriend(profile){
   if(!profile) return;
   selectedFriend = profile;
   document.getElementById('friend-detail-section').style.display = 'block';
-  document.getElementById('friend-detail-title').textContent = (profile.display_name || profile.email) + "'s rota";
+  document.getElementById('friend-detail-title').textContent = friendLabel(profile) + "'s rota";
   document.getElementById('friend-calendar-list').innerHTML = '<p class="empty">Loading…</p>';
 
   const [rotaRes, ovRes, stRes] = await Promise.all([
@@ -967,13 +1006,14 @@ async function loadAccountData(){
     sb.from('rota_settings').select('*').eq('user_id', currentUser.id).maybeSingle(),
     sb.from('overrides').select('*').eq('user_id', currentUser.id).order('override_date'),
     sb.from('pay_rates').select('*').eq('user_id', currentUser.id).maybeSingle(),
-    sb.from('profiles').select('is_admin').eq('id', currentUser.id).maybeSingle()
+    sb.from('profiles').select('is_admin,username').eq('id', currentUser.id).maybeSingle()
   ]);
   shiftTypes = stRes.data || [];
   templates = tplRes.data || [];
   allOverrides = ovRes.data || [];
   holidays = allOverrides.filter(o => o.value === '__holiday__');
   isAdmin = (profileRes.data && profileRes.data.is_admin) || false;
+  document.getElementById('username-input').value = (profileRes.data && profileRes.data.username) || '';
   document.getElementById('template-create-section').style.display = isAdmin ? 'block' : 'none';
   const tplSub = document.getElementById('templates-sub');
   if(tplSub){
