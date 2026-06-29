@@ -238,7 +238,49 @@
       </section>
     </div>
     <div class="tab-panel" id="tab-friends">
-      <div class="coming-soon"><span class="eyebrow">Coming soon</span>Friends — search, add, and view their updated rota side-by-side with yours.</div>
+      <header style="margin-bottom:16px;">
+        <p class="eyebrow">Friends</p>
+        <h1>Friends &amp; their rotas</h1>
+        <p class="sub">Search for someone, send a request, and once they accept you can see their fully updated rota.</p>
+      </header>
+
+      <section>
+        <p class="sec-title">Add a friend</p>
+        <div class="row">
+          <div><input type="text" id="friend-search-input" placeholder="Search by email"></div>
+          <button class="btn secondary" onclick="searchUsers()" style="white-space:nowrap;">Search</button>
+        </div>
+        <div id="friend-search-results"></div>
+      </section>
+
+      <section id="friend-requests-section" style="display:none;">
+        <p class="sec-title">Requests</p>
+        <div id="friend-requests-list"></div>
+      </section>
+
+      <section>
+        <p class="sec-title">My friends</p>
+        <div id="my-friends-list"></div>
+      </section>
+
+      <section id="friend-detail-section" style="display:none;">
+        <p class="sec-title" id="friend-detail-title">Their rota</p>
+        <div class="checkbox-row">
+          <input type="checkbox" id="friend-compare-toggle" onchange="renderFriendCalendar()">
+          <label for="friend-compare-toggle">Show when we're both working or both off</label>
+        </div>
+        <div class="row">
+          <div style="max-width:160px;">
+            <label>Show next</label>
+            <select id="friend-range" onchange="renderFriendCalendar()">
+              <option value="0.25">1 week</option>
+              <option value="0.5" selected>2 weeks</option>
+              <option value="1">1 month</option>
+            </select>
+          </div>
+        </div>
+        <div id="friend-calendar-list"></div>
+      </section>
     </div>
     <div class="tab-panel" id="tab-templates">
       <header style="margin-bottom:16px;">
@@ -447,6 +489,233 @@ let isSignup = false;
 let allOverrides = []; // every override row for the current user, not just holidays
 let bankHolidays = new Set();
 let pendingSwap = null; // { fromDate, toDate, fromValue, toValue }
+let allFriendships = []; // every friendship row involving me
+let profileCache = {}; // id -> profile, for friend display
+let selectedFriend = null; // profile of the friend currently being viewed
+let friendData = { rota: null, overrides: [], shiftTypes: [] };
+
+async function loadFriendsTab(){
+  const { data } = await sb.from('friendships')
+    .select('*')
+    .or('user_a.eq.' + currentUser.id + ',user_b.eq.' + currentUser.id);
+  allFriendships = data || [];
+
+  const otherIds = [...new Set(allFriendships.map(f => f.user_a === currentUser.id ? f.user_b : f.user_a))];
+  if(otherIds.length > 0){
+    const { data: profs } = await sb.from('profiles').select('id,email,display_name').in('id', otherIds);
+    (profs || []).forEach(p => profileCache[p.id] = p);
+  }
+
+  renderFriendRequests();
+  renderMyFriends();
+}
+
+function otherUserId(f){
+  return f.user_a === currentUser.id ? f.user_b : f.user_a;
+}
+
+async function searchUsers(){
+  const term = document.getElementById('friend-search-input').value.trim();
+  const resultsEl = document.getElementById('friend-search-results');
+  if(!term){ resultsEl.innerHTML = ''; return; }
+  const { data, error } = await sb.from('profiles').select('id,email,display_name').ilike('email', '%' + term + '%').limit(10);
+  resultsEl.innerHTML = '';
+  if(error){
+    resultsEl.innerHTML = '<p class="empty">Search failed: ' + escapeHtml(error.message) + '</p>';
+    return;
+  }
+  const results = (data || []).filter(p => p.id !== currentUser.id);
+  if(results.length === 0){
+    resultsEl.innerHTML = '<p class="empty">No matches.</p>';
+    return;
+  }
+  results.forEach(p=>{
+    profileCache[p.id] = p;
+    const existing = allFriendships.find(f => otherUserId(f) === p.id);
+    const div = document.createElement('div');
+    div.className = 'off-item';
+    div.innerHTML = '<span>' + escapeHtml(p.display_name || p.email) + '</span>';
+    if(existing){
+      const tag = document.createElement('span');
+      tag.style.color = 'var(--text-dim)';
+      tag.textContent = existing.status === 'accepted' ? 'Already friends'
+        : existing.requested_by === currentUser.id ? 'Request sent' : 'Request pending';
+      div.appendChild(tag);
+    } else {
+      const btn = document.createElement('button');
+      btn.textContent = 'Send request';
+      btn.style.color = 'var(--teal)';
+      btn.onclick = ()=>sendFriendRequest(p.id);
+      div.appendChild(btn);
+    }
+    resultsEl.appendChild(div);
+  });
+}
+
+async function sendFriendRequest(targetId){
+  const { data, error } = await sb.from('friendships').insert({
+    user_a: currentUser.id, user_b: targetId, requested_by: currentUser.id, status: 'pending'
+  }).select().single();
+  if(!error){
+    allFriendships.push(data);
+    searchUsers();
+  }
+}
+
+async function respondToRequest(id, status){
+  await sb.from('friendships').update({ status }).eq('id', id);
+  allFriendships = allFriendships.map(f => f.id === id ? { ...f, status } : f);
+  renderFriendRequests();
+  renderMyFriends();
+}
+
+function renderFriendRequests(){
+  const section = document.getElementById('friend-requests-section');
+  const el = document.getElementById('friend-requests-list');
+  const incoming = allFriendships.filter(f => f.status === 'pending' && f.requested_by !== currentUser.id);
+  const outgoing = allFriendships.filter(f => f.status === 'pending' && f.requested_by === currentUser.id);
+  if(incoming.length === 0 && outgoing.length === 0){
+    section.style.display = 'none';
+    return;
+  }
+  section.style.display = 'block';
+  el.innerHTML = '';
+  incoming.forEach(f=>{
+    const p = profileCache[otherUserId(f)];
+    const div = document.createElement('div');
+    div.className = 'off-item';
+    div.innerHTML = '<span>' + escapeHtml(p ? (p.display_name || p.email) : 'Someone') + ' wants to be friends</span>';
+    const btnGroup = document.createElement('span');
+    const acceptBtn = document.createElement('button');
+    acceptBtn.textContent = 'Accept';
+    acceptBtn.style.color = 'var(--teal)';
+    acceptBtn.onclick = ()=>respondToRequest(f.id, 'accepted');
+    btnGroup.appendChild(acceptBtn);
+    const declineBtn = document.createElement('button');
+    declineBtn.textContent = 'Decline';
+    declineBtn.style.marginLeft = '10px';
+    declineBtn.onclick = ()=>respondToRequest(f.id, 'declined');
+    btnGroup.appendChild(declineBtn);
+    div.appendChild(btnGroup);
+    el.appendChild(div);
+  });
+  outgoing.forEach(f=>{
+    const p = profileCache[otherUserId(f)];
+    const div = document.createElement('div');
+    div.className = 'off-item';
+    div.innerHTML = '<span>Waiting for ' + escapeHtml(p ? (p.display_name || p.email) : 'them') + ' to accept</span>';
+    const cancelBtn = document.createElement('button');
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.onclick = ()=>respondToRequest(f.id, 'declined');
+    div.appendChild(cancelBtn);
+    el.appendChild(div);
+  });
+}
+
+function renderMyFriends(){
+  const el = document.getElementById('my-friends-list');
+  const accepted = allFriendships.filter(f => f.status === 'accepted');
+  if(accepted.length === 0){
+    el.innerHTML = '<p class="empty">No friends yet — search above to add some.</p>';
+    return;
+  }
+  el.innerHTML = '';
+  accepted.forEach(f=>{
+    const p = profileCache[otherUserId(f)];
+    const div = document.createElement('div');
+    div.className = 'off-item';
+    div.innerHTML = '<span>' + escapeHtml(p ? (p.display_name || p.email) : 'Friend') + '</span>';
+    const btn = document.createElement('button');
+    btn.textContent = 'View rota';
+    btn.style.color = 'var(--teal)';
+    btn.onclick = ()=>selectFriend(p);
+    div.appendChild(btn);
+    el.appendChild(div);
+  });
+}
+
+async function selectFriend(profile){
+  if(!profile) return;
+  selectedFriend = profile;
+  document.getElementById('friend-detail-section').style.display = 'block';
+  document.getElementById('friend-detail-title').textContent = (profile.display_name || profile.email) + "'s rota";
+  document.getElementById('friend-calendar-list').innerHTML = '<p class="empty">Loading…</p>';
+
+  const [rotaRes, ovRes, stRes] = await Promise.all([
+    sb.from('rota_settings').select('*').eq('user_id', profile.id).maybeSingle(),
+    sb.from('overrides').select('*').eq('user_id', profile.id),
+    sb.from('shift_types').select('*').eq('owner_id', profile.id)
+  ]);
+  friendData = {
+    rota: rotaRes.data || null,
+    overrides: ovRes.data || [],
+    shiftTypes: stRes.data || []
+  };
+  renderFriendCalendar();
+  document.getElementById('friend-detail-section').scrollIntoView({behavior:'smooth', block:'start'});
+}
+
+function computeEffectiveShift(rotaObj, overridesArr, dateStr){
+  const ov = overridesArr.find(o => o.override_date === dateStr);
+  if(ov) return ov.value;
+  if(!rotaObj || !rotaObj.rota_start) return '';
+  const start = new Date(rotaObj.rota_start + 'T00:00:00');
+  const d = new Date(dateStr + 'T00:00:00');
+  const diffDays = Math.floor((d - start) / 86400000);
+  const len = (rotaObj.weeks || 5) * 7;
+  let idx = diffDays % len;
+  if(idx < 0) idx += len;
+  return (rotaObj.original_pattern || [])[idx] || '';
+}
+
+function renderFriendCalendar(){
+  const listEl = document.getElementById('friend-calendar-list');
+  if(!listEl || !selectedFriend) return;
+  if(!friendData.rota){
+    listEl.innerHTML = '<p class="empty">They haven\'t set up their rota yet.</p>';
+    return;
+  }
+  const compare = document.getElementById('friend-compare-toggle').checked;
+  const rangeVal = document.getElementById('friend-range').value;
+  const today = new Date(); today.setHours(0,0,0,0);
+  const end = new Date(today);
+  if(rangeVal === '0.25') end.setDate(end.getDate()+6);
+  else if(rangeVal === '0.5') end.setDate(end.getDate()+13);
+  else end.setMonth(end.getMonth() + parseInt(rangeVal,10));
+
+  listEl.innerHTML = '';
+  const cursor = new Date(today);
+  const myRota = { rota_start: rotaStart, weeks: weeks, original_pattern: pattern };
+
+  while(cursor <= end){
+    const key = dateKeyLocal(cursor);
+    const friendShiftId = computeEffectiveShift(friendData.rota, friendData.overrides, key);
+    const friendShift = friendData.shiftTypes.find(s => s.id === friendShiftId);
+    const friendWorking = !!friendShiftId && friendShiftId !== '__holiday__';
+
+    const row = document.createElement('div');
+    row.className = 'off-item';
+    const dateLabel = cursor.toLocaleDateString(undefined, {weekday:'short', day:'numeric', month:'short'});
+    let label = dateLabel + ' — ';
+
+    if(compare){
+      const myShiftId = computeEffectiveShift(myRota, allOverrides, key);
+      const myWorking = !!myShiftId && myShiftId !== '__holiday__';
+      if(myWorking && friendWorking) label += 'Both working';
+      else if(!myWorking && !friendWorking) label += 'Both off';
+      else if(myWorking && !friendWorking) label += 'You working, they\'re off';
+      else label += 'They\'re working, you\'re off';
+    } else {
+      if(friendShiftId === '__holiday__') label += 'Holiday';
+      else if(friendShift) label += friendShift.name;
+      else label += '—';
+    }
+
+    row.innerHTML = '<span>' + label + '</span>';
+    listEl.appendChild(row);
+    cursor.setDate(cursor.getDate()+1);
+  }
+}
 
 async function loadBankHolidays(){
   try{
@@ -750,6 +1019,7 @@ async function loadAccountData(){
   renderOriginalGrid();
   renderHolidayList();
   renderCalendarTab();
+  loadFriendsTab();
 }
 
 async function addShiftType(){
