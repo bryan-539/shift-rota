@@ -154,15 +154,20 @@
       </section>
 
       <section>
-        <p class="sec-title">Swap a shift</p>
-        <p class="help" style="margin-top:0;">Move a shift from one of your dates to another. (Swapping with a friend will be added once the Friends tab is built.)</p>
+        <p class="sec-title">Change a day</p>
+        <p class="help" style="margin-top:0;">Pick a date, then what it should become — a different shift, or a rest day. (Trading with a friend will be added once the Friends tab is built.)</p>
         <div class="row">
-          <div><label>From date</label><input type="date" id="swap-from"></div>
-          <div><label>To date</label><input type="date" id="swap-to"></div>
+          <div><label>Date</label><input type="date" id="swap-from"></div>
+          <div>
+            <label>Change to</label>
+            <select id="swap-to-shift">
+              <option value="">Rest day</option>
+            </select>
+          </div>
         </div>
-        <button class="btn secondary full" onclick="initiateSelfSwap()">Swap these shifts</button>
+        <button class="btn secondary full" onclick="initiateSelfSwap()">Apply change</button>
         <div id="swap-confirm-box" style="display:none;margin-top:12px;">
-          <p class="help" style="margin-top:0;font-weight:600;color:var(--text);">Do you need to inform your workplace of this swap?</p>
+          <p class="help" style="margin-top:0;font-weight:600;color:var(--text);">Do you need to inform your workplace of this change?</p>
           <div class="row">
             <button class="btn secondary" style="flex:1;" onclick="finalizeSwap('no')">No</button>
             <button class="btn secondary" style="flex:1;" onclick="finalizeSwap('already')">Already done</button>
@@ -173,19 +178,39 @@
       </section>
 
       <section>
+        <p class="sec-title">Share your live calendar</p>
+        <p class="help" style="margin-top:0;">One link, always up to date — give it to anyone, or subscribe to it yourself in Outlook.</p>
         <div class="row">
-          <div style="max-width:200px;">
+          <div><input type="text" id="share-link-box" readonly></div>
+          <button class="btn secondary" onclick="copyShareLink()" style="white-space:nowrap;">Copy link</button>
+        </div>
+        <div class="status" id="share-status"></div>
+      </section>
+
+      <section>
+        <div class="row">
+          <div style="max-width:160px;">
             <label>Show next</label>
             <select id="calendar-range" onchange="renderCalendarTab()">
+              <option value="0.25">1 week</option>
+              <option value="0.5">2 weeks</option>
               <option value="1">1 month</option>
               <option value="3" selected>3 months</option>
               <option value="6">6 months</option>
               <option value="12">12 months</option>
             </select>
           </div>
+          <div style="max-width:160px;">
+            <label>View</label>
+            <select id="calendar-view-mode" onchange="renderCalendarTab()">
+              <option value="list">List</option>
+              <option value="grid">Grid</option>
+            </select>
+          </div>
         </div>
         <div id="calendar-income" style="margin-bottom:14px;"></div>
         <div id="calendar-list"></div>
+        <div id="calendar-grid"></div>
       </section>
     </div>
     <div class="tab-panel" id="tab-original">
@@ -225,6 +250,14 @@
       <section id="template-create-section" style="display:none;">
         <p class="sec-title">Create a new template</p>
         <p class="help" style="margin-top:0;margin-bottom:12px;">Only your account can do this — everyone else just browses and adds.</p>
+        <div class="row">
+          <div>
+            <label>Copy from an existing template (optional)</label>
+            <select id="tpl-copy-from" onchange="copyFromExisting('tpl')">
+              <option value="">— Start from scratch —</option>
+            </select>
+          </div>
+        </div>
         <div class="row">
           <div><label>Name</label><input type="text" id="tpl-name" placeholder="e.g. T01"></div>
           <div><label>Category (depot/location)</label><input type="text" id="tpl-category" placeholder="e.g. Matlock, Belper"></div>
@@ -280,6 +313,14 @@
 
       <section>
         <p class="sec-title">1 · Your shift types</p>
+        <div class="row">
+          <div>
+            <label>Copy from an existing shift (optional)</label>
+            <select id="st-copy-from" onchange="copyFromExisting('st')">
+              <option value="">— Start from scratch —</option>
+            </select>
+          </div>
+        </div>
         <div class="row">
           <div><label>Name</label><input type="text" id="st-name" placeholder="e.g. Early, Late, Night"></div>
         </div>
@@ -684,6 +725,7 @@ async function loadAccountData(){
   }
   document.getElementById('rota-start').value = rotaStart;
   document.getElementById('weeks-select').value = String(weeks);
+  await loadShareLink();
   renderShiftTypeList();
   renderTemplatesBrowseList();
   renderGrid();
@@ -758,7 +800,43 @@ async function addTemplateToMine(tpl){
   }
 }
 
+function populateCopyFromSelects(){
+  const stSel = document.getElementById('st-copy-from');
+  if(stSel){
+    stSel.innerHTML = '<option value="">— Start from scratch —</option>' +
+      shiftTypes.map(s => '<option value="' + s.id + '">' + escapeHtml(s.name) + '</option>').join('');
+  }
+  const tplSel = document.getElementById('tpl-copy-from');
+  if(tplSel){
+    tplSel.innerHTML = '<option value="">— Start from scratch —</option>' +
+      templates.map(t => '<option value="' + t.id + '">' + escapeHtml(t.name) + '</option>').join('');
+  }
+}
+
+function copyFromExisting(prefix){
+  const sel = document.getElementById(prefix + '-copy-from');
+  const sourceId = sel.value;
+  if(!sourceId) return;
+  const source = (prefix === 'st' ? shiftTypes : templates).find(item => item.id === sourceId);
+  if(!source) return;
+
+  document.getElementById(prefix + '-name').value = source.name + ' (copy)';
+  document.getElementById(prefix + '-color').value = source.color || '#F2A93B';
+  document.getElementById(prefix + '-allday').checked = source.all_day;
+  document.getElementById(prefix + '-time-row').style.display = source.all_day ? 'none' : 'flex';
+  document.getElementById(prefix + '-start').value = source.start_time || '09:00';
+  document.getElementById(prefix + '-end').value = source.end_time || '17:00';
+  document.getElementById(prefix + '-paid').value = source.paid_hours || '';
+  if(prefix === 'tpl'){
+    document.getElementById('tpl-category').value = source.category || '';
+  }
+  legBuilders[prefix] = (source.legs_data && Array.isArray(source.legs_data)) ? JSON.parse(JSON.stringify(source.legs_data)) : [];
+  renderLegRows(prefix);
+  sel.value = ''; // reset the picker itself so it's clear this was a one-off copy, not a persistent link
+}
+
 function renderShiftTypeList(){
+  populateCopyFromSelects();
   const ownEl = document.getElementById('own-shift-type-list');
   const tplEl = document.getElementById('template-shift-type-list');
   const ownTypes = shiftTypes.filter(s => !s.source_template_id);
@@ -843,6 +921,8 @@ function cancelEdit(prefix){
   document.getElementById(prefix + '-name').value = '';
   document.getElementById(prefix + '-paid').value = '';
   if(prefix === 'tpl') document.getElementById('tpl-category').value = '';
+  const copySel = document.getElementById(prefix + '-copy-from');
+  if(copySel) copySel.value = '';
   document.getElementById(prefix + '-allday').checked = false;
   document.getElementById(prefix + '-time-row').style.display = 'flex';
   legBuilders[prefix] = [];
@@ -944,12 +1024,14 @@ async function createTemplate(){
   statusEl.style.color = 'var(--teal)';
   statusEl.textContent = editingItem.tpl ? 'Template updated.' : 'Template created.';
   renderTemplatesBrowseList();
+  populateCopyFromSelects();
 }
 
 async function deleteTemplate(id){
   await sb.from('shift_types').delete().eq('id', id);
   templates = templates.filter(t => t.id !== id);
   renderTemplatesBrowseList();
+  populateCopyFromSelects();
 }
 
 document.getElementById('tpl-allday') && document.getElementById('tpl-allday').addEventListener('change', (e)=>{
@@ -1211,6 +1293,33 @@ async function removeHoliday(id){
   renderCalendarTab();
 }
 
+const WORKER_URL = 'https://shift-rota.ryan-williams-26.workers.dev';
+
+async function loadShareLink(){
+  let { data } = await sb.from('calendar_shares').select('share_token').eq('user_id', currentUser.id).maybeSingle();
+  if(!data){
+    const insertRes = await sb.from('calendar_shares').insert({ user_id: currentUser.id }).select('share_token').single();
+    data = insertRes.data;
+  }
+  const box = document.getElementById('share-link-box');
+  if(box && data){
+    box.value = WORKER_URL + '/calendar.ics?token=' + data.share_token;
+  }
+}
+
+function copyShareLink(){
+  const box = document.getElementById('share-link-box');
+  const statusEl = document.getElementById('share-status');
+  box.select();
+  let copied = false;
+  try{ copied = document.execCommand('copy'); }catch(e){}
+  if(!copied && navigator.clipboard){
+    navigator.clipboard.writeText(box.value).catch(()=>{});
+  }
+  statusEl.style.color = 'var(--teal)';
+  statusEl.textContent = 'Link copied.';
+}
+
 function dateKeyLocal(d){
   return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
 }
@@ -1264,24 +1373,61 @@ async function confirmTentative(id){
   renderCalendarTab();
 }
 
+function getCalendarEndDate(today){
+  const rangeVal = document.getElementById('calendar-range').value;
+  const end = new Date(today);
+  if(rangeVal === '0.25'){ end.setDate(end.getDate() + 6); }
+  else if(rangeVal === '0.5'){ end.setDate(end.getDate() + 13); }
+  else { end.setMonth(end.getMonth() + parseInt(rangeVal, 10)); }
+  return end;
+}
+
+function rangeLabel(){
+  const rangeVal = document.getElementById('calendar-range').value;
+  if(rangeVal === '0.25') return 'the next week';
+  if(rangeVal === '0.5') return 'the next fortnight';
+  return 'the next ' + rangeVal + ' month' + (rangeVal==='1'?'':'s');
+}
+
 function renderCalendarTab(){
   renderTentativeBanner();
+  populateSwapToSelect();
   const listEl = document.getElementById('calendar-list');
+  const gridEl = document.getElementById('calendar-grid');
   const incomeEl = document.getElementById('calendar-income');
   if(!listEl) return;
   if(!rotaStart){
     listEl.innerHTML = '<p class="empty">Set up your original rota in Account &amp; Setup first.</p>';
+    gridEl.innerHTML = '';
     incomeEl.innerHTML = '';
     return;
   }
-  const months = parseInt(document.getElementById('calendar-range').value, 10);
+  const viewMode = document.getElementById('calendar-view-mode').value;
   const today = new Date(); today.setHours(0,0,0,0);
-  const end = new Date(today); end.setMonth(end.getMonth() + months);
+  const end = getCalendarEndDate(today);
 
+  listEl.style.display = viewMode === 'list' ? 'block' : 'none';
+  gridEl.style.display = viewMode === 'grid' ? 'block' : 'none';
   listEl.innerHTML = '';
-  let weekTotal = 0, weekStartIdx = -1, grandTotal = 0, weekCount = 0;
+  gridEl.innerHTML = '';
+  gridEl.className = viewMode === 'grid' ? 'grid' : '';
+
+  // Pad the grid's first row so columns line up Sun..Sat
+  if(viewMode === 'grid'){
+    DAY_LABELS.forEach(d=>{
+      const lbl = document.createElement('div');
+      lbl.className = 'day-label';
+      lbl.textContent = d;
+      gridEl.appendChild(lbl);
+    });
+    for(let i=0; i<today.getDay(); i++){
+      const blank = document.createElement('div');
+      gridEl.appendChild(blank);
+    }
+  }
+
+  let weekTotal = 0, grandTotal = 0;
   const cursor = new Date(today);
-  let dayCount = 0;
 
   while(cursor <= end){
     const key = dateKeyLocal(cursor);
@@ -1290,68 +1436,99 @@ function renderCalendarTab(){
     const isHoliday = shiftId === '__holiday__';
     const isBankHoliday = bankHolidays.has(key);
     const ov = allOverrides.find(o => o.override_date === key);
+    const dayPay = (payRates.enabled && shift) ? shiftPay(shift, cursor.getDay()) : 0;
 
-    const row = document.createElement('div');
-    row.className = 'off-item';
-    if(isBankHoliday) row.style.borderColor = 'var(--amber)';
-
-    const dateObj = new Date(cursor);
-    const dateLabel = dateObj.toLocaleDateString(undefined, {weekday:'short', day:'numeric', month:'short'});
-    let label = dateLabel;
-    let swatch = '';
-    if(isHoliday){
-      label += ' — Holiday';
-    } else if(shift){
-      swatch = '<span style="display:inline-block;width:10px;height:10px;border-radius:3px;background:' + (shift.color||'#F2A93B') + ';margin-right:6px;"></span>';
-      label += ' — ' + shift.name;
-      if(payRates.enabled){
-        label += ' (£' + shiftPay(shift, cursor.getDay()===0?0:cursor.getDay()).toFixed(2) + ')';
+    if(viewMode === 'list'){
+      const row = document.createElement('div');
+      row.className = 'off-item';
+      if(isBankHoliday) row.style.borderColor = 'var(--amber)';
+      const dateLabel = cursor.toLocaleDateString(undefined, {weekday:'short', day:'numeric', month:'short'});
+      let label = dateLabel;
+      let swatch = '';
+      if(isHoliday){
+        label += ' — Holiday';
+      } else if(shift){
+        swatch = '<span style="display:inline-block;width:10px;height:10px;border-radius:3px;background:' + (shift.color||'#F2A93B') + ';margin-right:6px;"></span>';
+        label += ' — ' + shift.name;
+        if(payRates.enabled) label += ' (£' + dayPay.toFixed(2) + ')';
+      } else {
+        label += ' — —';
       }
+      if(isBankHoliday) label += ' 🎉 Bank holiday';
+      if(ov && (ov.source === 'self_swap' || ov.source === 'friend_swap')) label += ' ⇄ changed';
+      if(ov && ov.tentative) label += ' ⏳';
+      row.innerHTML = '<span>' + swatch + label + '</span>';
+      listEl.appendChild(row);
     } else {
-      label += ' — —';
+      if(cursor.getDay() === 0 && cursor.getTime() !== today.getTime()){
+        const marker = document.createElement('div');
+        marker.className = 'week-marker';
+        marker.textContent = cursor.toLocaleDateString(undefined, {day:'numeric', month:'short'});
+        gridEl.appendChild(marker);
+        DAY_LABELS.forEach(d=>{
+          const lbl = document.createElement('div');
+          lbl.className = 'day-label';
+          lbl.textContent = d;
+          gridEl.appendChild(lbl);
+        });
+      }
+      const cell = document.createElement('div');
+      cell.className = 'day-cell-readonly';
+      cell.title = cursor.toLocaleDateString();
+      if(isBankHoliday) cell.style.outline = '2px solid var(--amber)';
+      let inner = String(cursor.getDate());
+      if(isHoliday){
+        inner += '<span class="pay-line">Holiday</span>';
+        cell.style.background = 'var(--teal)';
+        cell.style.color = '#1B1E26';
+      } else if(shift){
+        cell.style.background = shift.color || '#F2A93B';
+        cell.style.color = '#1B1E26';
+        inner += '<span class="pay-line">' + escapeHtml(shift.name) + (payRates.enabled ? ' £'+dayPay.toFixed(2) : '') + '</span>';
+      } else {
+        inner += '<span class="pay-line">—</span>';
+      }
+      if(ov && (ov.source === 'self_swap' || ov.source === 'friend_swap')) inner += '<span class="pay-line">⇄</span>';
+      cell.innerHTML = inner;
+      gridEl.appendChild(cell);
     }
-    if(isBankHoliday) label += ' 🎉 Bank holiday';
-    if(ov && (ov.source === 'self_swap' || ov.source === 'friend_swap')) label += ' ⇄ swapped';
-    if(ov && ov.tentative) label += ' ⏳';
 
-    row.innerHTML = '<span>' + swatch + label + '</span>';
-    listEl.appendChild(row);
-
-    // weekly income subtotal (calendar weeks running Sun-Sat for display)
-    if(payRates.enabled && shift){
-      weekTotal += shiftPay(shift, cursor.getDay());
-    }
-    dayCount++;
-    if(cursor.getDay() === 6 || cursor.getTime() === end.getTime()){ // Saturday end of week, or final day
+    weekTotal += dayPay;
+    if(cursor.getDay() === 6 || cursor.getTime() === end.getTime()){
       grandTotal += weekTotal;
-      weekCount++;
       weekTotal = 0;
     }
 
     cursor.setDate(cursor.getDate()+1);
   }
 
-  if(payRates.enabled){
-    incomeEl.innerHTML = '<div class="income-row total"><span>Estimated income, next ' + months + ' month' + (months===1?'':'s') + '</span><strong>£' + grandTotal.toFixed(2) + '</strong></div>';
-  } else {
-    incomeEl.innerHTML = '';
-  }
+  incomeEl.innerHTML = payRates.enabled
+    ? '<div class="income-row total"><span>Estimated income, ' + rangeLabel() + '</span><strong>£' + grandTotal.toFixed(2) + '</strong></div>'
+    : '';
+}
+
+function populateSwapToSelect(){
+  const sel = document.getElementById('swap-to-shift');
+  if(!sel) return;
+  sel.innerHTML = '<option value="">Rest day</option>';
+  shiftTypes.forEach(s=>{
+    const opt = document.createElement('option');
+    opt.value = s.id;
+    opt.textContent = s.name;
+    sel.appendChild(opt);
+  });
 }
 
 function initiateSelfSwap(){
-  const fromDate = document.getElementById('swap-from').value;
-  const toDate = document.getElementById('swap-to').value;
+  const date = document.getElementById('swap-from').value;
+  const newValue = document.getElementById('swap-to-shift').value;
   const statusEl = document.getElementById('swap-status');
-  if(!fromDate || !toDate || fromDate === toDate){
+  if(!date){
     statusEl.style.color = 'var(--danger)';
-    statusEl.textContent = 'Pick two different dates.';
+    statusEl.textContent = 'Pick a date first.';
     return;
   }
-  pendingSwap = {
-    fromDate, toDate,
-    fromValue: effectiveShift(fromDate),
-    toValue: effectiveShift(toDate)
-  };
+  pendingSwap = { date, newValue };
   document.getElementById('swap-confirm-box').style.display = 'block';
   statusEl.textContent = '';
 }
@@ -1360,13 +1537,10 @@ async function finalizeSwap(choice){
   if(!pendingSwap) return;
   const statusEl = document.getElementById('swap-status');
   const tentative = choice === 'need_to';
-  const rows = [
-    { user_id: currentUser.id, override_date: pendingSwap.fromDate, value: pendingSwap.toValue, source: 'self_swap', tentative },
-    { user_id: currentUser.id, override_date: pendingSwap.toDate, value: pendingSwap.fromValue, source: 'self_swap', tentative }
-  ];
+  const row = { user_id: currentUser.id, override_date: pendingSwap.date, value: pendingSwap.newValue, source: 'self_swap', tentative };
   statusEl.style.color = 'var(--text-dim)';
-  statusEl.textContent = 'Saving swap…';
-  const { error } = await sb.from('overrides').upsert(rows, { onConflict: 'user_id,override_date' });
+  statusEl.textContent = 'Saving…';
+  const { error } = await sb.from('overrides').upsert([row], { onConflict: 'user_id,override_date' });
   document.getElementById('swap-confirm-box').style.display = 'none';
   if(error){
     statusEl.style.color = 'var(--danger)';
@@ -1375,9 +1549,9 @@ async function finalizeSwap(choice){
     return;
   }
   statusEl.style.color = 'var(--teal)';
-  statusEl.textContent = tentative ? 'Swapped — flagged as needing workplace confirmation.' : 'Swapped.';
+  statusEl.textContent = tentative ? 'Changed — flagged as needing workplace confirmation.' : 'Changed.';
   document.getElementById('swap-from').value = '';
-  document.getElementById('swap-to').value = '';
+  document.getElementById('swap-to-shift').value = '';
   pendingSwap = null;
   const { data } = await sb.from('overrides').select('*').eq('user_id', currentUser.id).order('override_date');
   allOverrides = data || [];
