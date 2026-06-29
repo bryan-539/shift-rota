@@ -147,7 +147,41 @@
       <div class="coming-soon"><span class="eyebrow">Coming soon</span>Friends — search, add, and view their updated rota side-by-side with yours.</div>
     </div>
     <div class="tab-panel" id="tab-templates">
-      <div class="coming-soon"><span class="eyebrow">Coming soon</span>Templates — a shared library of shift types anyone can use.</div>
+      <header style="margin-bottom:16px;">
+        <p class="eyebrow">Templates</p>
+        <h1>Shared shift library</h1>
+        <p class="sub" id="templates-sub">Add any of these straight into your own rota — no retyping times or rates.</p>
+      </header>
+
+      <section id="template-create-section" style="display:none;">
+        <p class="sec-title">Create a new template</p>
+        <p class="help" style="margin-top:0;margin-bottom:12px;">Only your account can do this — everyone else just browses and adds.</p>
+        <div class="row">
+          <div><label>Name</label><input type="text" id="tpl-name" placeholder="e.g. T01"></div>
+          <div style="flex:0 0 60px;"><label>Colour</label><input type="color" id="tpl-color" value="#43C6AC"></div>
+        </div>
+        <div class="checkbox-row">
+          <input type="checkbox" id="tpl-allday">
+          <label for="tpl-allday">No fixed time (all-day / flexible)</label>
+        </div>
+        <div class="row" id="tpl-time-row">
+          <div><label>Start time</label><input type="time" id="tpl-start" value="09:00"></div>
+          <div><label>End time</label><input type="time" id="tpl-end" value="17:00"></div>
+        </div>
+        <div class="row">
+          <div><label>Paid hours (HH:MM)</label><input type="text" id="tpl-paid" placeholder="e.g. 08:43"></div>
+        </div>
+        <div class="row">
+          <div><label>Default description</label><input type="text" id="tpl-desc" placeholder="optional"></div>
+        </div>
+        <button class="btn full" onclick="createTemplate()">Create template</button>
+        <div class="status" id="tpl-create-status"></div>
+      </section>
+
+      <section>
+        <p class="sec-title">Available templates</p>
+        <div id="templates-browse-list"></div>
+      </section>
     </div>
 
     <div class="tab-panel active" id="tab-account">
@@ -260,6 +294,7 @@ let weeks = 5;
 let rotaStart = '';
 let holidays = []; // override rows where value === '__holiday__'
 let payRates = { enabled:false, sun:0, mon:0, tue:0, wed:0, thu:0, fri:0, sat:0 };
+let isAdmin = false;
 let isSignup = false;
 
 // ---------- AUTH ----------
@@ -338,16 +373,25 @@ document.getElementById('st-allday').addEventListener('change', (e)=>{
 });
 
 async function loadAccountData(){
-  const [stRes, tplRes, rotaRes, holRes, payRes] = await Promise.all([
+  const [stRes, tplRes, rotaRes, holRes, payRes, profileRes] = await Promise.all([
     sb.from('shift_types').select('*').eq('owner_id', currentUser.id),
     sb.from('shift_types').select('*').eq('is_template', true),
     sb.from('rota_settings').select('*').eq('user_id', currentUser.id).maybeSingle(),
     sb.from('overrides').select('*').eq('user_id', currentUser.id).eq('value', '__holiday__').order('override_date'),
-    sb.from('pay_rates').select('*').eq('user_id', currentUser.id).maybeSingle()
+    sb.from('pay_rates').select('*').eq('user_id', currentUser.id).maybeSingle(),
+    sb.from('profiles').select('is_admin').eq('id', currentUser.id).maybeSingle()
   ]);
   shiftTypes = stRes.data || [];
   templates = tplRes.data || [];
   holidays = holRes.data || [];
+  isAdmin = (profileRes.data && profileRes.data.is_admin) || false;
+  document.getElementById('template-create-section').style.display = isAdmin ? 'block' : 'none';
+  const tplSub = document.getElementById('templates-sub');
+  if(tplSub){
+    tplSub.textContent = isAdmin
+      ? 'Create shared shift types here, or add any existing one straight into your own rota.'
+      : 'Add any of these straight into your own rota — no retyping times or rates.';
+  }
   if(payRes.data){
     payRates = {
       enabled: payRes.data.enabled || false,
@@ -378,6 +422,7 @@ async function loadAccountData(){
   document.getElementById('weeks-select').value = String(weeks);
   renderShiftTypeList();
   renderTemplateList();
+  renderTemplatesBrowseList();
   renderGrid();
   renderOriginalGrid();
   renderHolidayList();
@@ -458,6 +503,83 @@ function renderShiftTypeList(){
     });
   }
 }
+
+function renderTemplatesBrowseList(){
+  const el = document.getElementById('templates-browse-list');
+  if(!el) return;
+  el.innerHTML = '';
+  if(templates.length === 0){
+    el.innerHTML = '<p class="empty">No templates yet' + (isAdmin ? ' — create your first one above.' : ' — check back later.') + '</p>';
+    return;
+  }
+  templates.forEach(t=>{
+    const div = document.createElement('div');
+    div.className = 'off-item';
+    const timeLabel = t.all_day ? 'no fixed time' : (t.start_time + '–' + t.end_time);
+    const swatch = '<span style="display:inline-block;width:12px;height:12px;border-radius:3px;background:' + (t.color || '#43C6AC') + ';margin-right:8px;"></span>';
+    div.innerHTML = '<span>' + swatch + escapeHtml(t.name) + ' · ' + timeLabel + (t.paid_hours ? ' · paid ' + t.paid_hours : '') + '</span>';
+    const btnGroup = document.createElement('span');
+    const addBtn = document.createElement('button');
+    addBtn.textContent = 'Add to mine';
+    addBtn.style.color = 'var(--teal)';
+    addBtn.onclick = ()=>addTemplateToMine(t);
+    btnGroup.appendChild(addBtn);
+    if(isAdmin){
+      const delBtn = document.createElement('button');
+      delBtn.textContent = 'Delete';
+      delBtn.style.marginLeft = '10px';
+      delBtn.onclick = ()=>deleteTemplate(t.id);
+      btnGroup.appendChild(delBtn);
+    }
+    div.appendChild(btnGroup);
+    el.appendChild(div);
+  });
+}
+
+async function createTemplate(){
+  const statusEl = document.getElementById('tpl-create-status');
+  const name = document.getElementById('tpl-name').value.trim();
+  if(!name) return;
+  const allDay = document.getElementById('tpl-allday').checked;
+  const start = document.getElementById('tpl-start').value;
+  const end = document.getElementById('tpl-end').value;
+  const paidHours = document.getElementById('tpl-paid').value.trim();
+  const description = document.getElementById('tpl-desc').value.trim();
+  const color = document.getElementById('tpl-color').value;
+
+  const { data, error } = await sb.from('shift_types').insert({
+    owner_id: null, is_template: true, name,
+    all_day: allDay, start_time: start, end_time: end,
+    paid_hours: paidHours, description, color
+  }).select().single();
+
+  if(error){
+    statusEl.style.color = 'var(--danger)';
+    statusEl.textContent = error.message;
+    return;
+  }
+  templates.push(data);
+  document.getElementById('tpl-name').value = '';
+  document.getElementById('tpl-paid').value = '';
+  document.getElementById('tpl-desc').value = '';
+  document.getElementById('tpl-allday').checked = false;
+  document.getElementById('tpl-time-row').style.display = 'flex';
+  statusEl.style.color = 'var(--teal)';
+  statusEl.textContent = 'Template created.';
+  renderTemplateList();
+  renderTemplatesBrowseList();
+}
+
+async function deleteTemplate(id){
+  await sb.from('shift_types').delete().eq('id', id);
+  templates = templates.filter(t => t.id !== id);
+  renderTemplateList();
+  renderTemplatesBrowseList();
+}
+
+document.getElementById('tpl-allday') && document.getElementById('tpl-allday').addEventListener('change', (e)=>{
+  document.getElementById('tpl-time-row').style.display = e.target.checked ? 'none' : 'flex';
+});
 
 function renderTemplateList(){
   const section = document.getElementById('template-section');
