@@ -122,7 +122,7 @@
       </header>
 
       <section>
-        <p class="sec-title">5-week pattern</p>
+        <p class="sec-title" id="original-pattern-title">Pattern</p>
         <div id="original-grid"></div>
       </section>
 
@@ -182,7 +182,26 @@
       </section>
 
       <section>
-        <p class="sec-title">2 · Your 5-week pattern</p>
+        <p class="sec-title">2 · Your rota pattern</p>
+        <div class="row">
+          <div style="max-width:160px;">
+            <label>Pattern length (weeks)</label>
+            <select id="weeks-select" onchange="changeWeeks()">
+              <option value="1">1 week</option>
+              <option value="2">2 weeks</option>
+              <option value="3">3 weeks</option>
+              <option value="4">4 weeks</option>
+              <option value="5">5 weeks</option>
+              <option value="6">6 weeks</option>
+              <option value="7">7 weeks</option>
+              <option value="8">8 weeks</option>
+              <option value="9">9 weeks</option>
+              <option value="10">10 weeks</option>
+              <option value="11">11 weeks</option>
+              <option value="12">12 weeks</option>
+            </select>
+          </div>
+        </div>
         <p class="help" style="margin-top:0;margin-bottom:12px;">Day 1 of Week 1 lines up with the date you set below. Pick a shift for each day — leave as "—" for a rest day.</p>
         <div id="pattern-grid"></div>
       </section>
@@ -209,6 +228,7 @@ let currentUser = null;
 let shiftTypes = [];     // personal shift types
 let templates = [];      // admin templates (is_template = true)
 let pattern = Array(35).fill('');
+let weeks = 5;
 let rotaStart = '';
 let holidays = []; // override rows where value === '__holiday__'
 let isSignup = false;
@@ -300,12 +320,18 @@ async function loadAccountData(){
   holidays = holRes.data || [];
   if(rotaRes.data){
     rotaStart = rotaRes.data.rota_start || '';
-    pattern = rotaRes.data.original_pattern || Array(35).fill('');
+    weeks = rotaRes.data.weeks || 5;
+    pattern = rotaRes.data.original_pattern || Array(weeks*7).fill('');
+    if(pattern.length !== weeks*7){
+      pattern = resizePatternArray(pattern, weeks);
+    }
   } else {
     rotaStart = '';
+    weeks = 5;
     pattern = Array(35).fill('');
   }
   document.getElementById('rota-start').value = rotaStart;
+  document.getElementById('weeks-select').value = String(weeks);
   renderShiftTypeList();
   renderTemplateList();
   renderGrid();
@@ -413,11 +439,31 @@ function renderTemplateList(){
   });
 }
 
-function renderGrid(){
+function resizePatternArray(arr, newWeeks){
+  const newLen = newWeeks * 7;
+  const copy = arr.slice(0, newLen);
+  while(copy.length < newLen) copy.push('');
+  return copy;
+}
+
+function changeWeeks(){
+  const newWeeks = parseInt(document.getElementById('weeks-select').value, 10);
+  const newLen = newWeeks * 7;
+  if(newLen < pattern.length){
+    const wouldLose = pattern.slice(newLen).some(p => p !== '');
+    if(wouldLose && !confirm('Shrinking the pattern will permanently remove shifts set on the dropped days. Continue?')){
+      document.getElementById('weeks-select').value = String(weeks);
+      return;
+    }
+  }
+  pattern = resizePatternArray(pattern, newWeeks);
+  weeks = newWeeks;
+  renderGrid();
+}
   const grid = document.getElementById('pattern-grid');
   grid.innerHTML = '';
   grid.className = 'grid';
-  for(let w=0; w<5; w++){
+  for(let w=0; w<weeks; w++){
     const marker = document.createElement('div');
     marker.className = 'week-marker';
     marker.textContent = 'Week ' + (w+1);
@@ -459,9 +505,11 @@ function renderGrid(){
 function renderOriginalGrid(){
   const grid = document.getElementById('original-grid');
   if(!grid) return;
+  const titleEl = document.getElementById('original-pattern-title');
+  if(titleEl) titleEl.textContent = weeks + '-week pattern';
   grid.innerHTML = '';
   grid.className = 'grid';
-  for(let w=0; w<5; w++){
+  for(let w=0; w<weeks; w++){
     const marker = document.createElement('div');
     marker.className = 'week-marker';
     marker.textContent = 'Week ' + (w+1);
@@ -587,6 +635,7 @@ async function saveOriginalRota(){
   const { error } = await sb.from('rota_settings').upsert({
     user_id: currentUser.id,
     rota_start: rotaStart,
+    weeks: weeks,
     original_pattern: pattern,
     updated_at: new Date().toISOString()
   });
