@@ -207,7 +207,8 @@
             <textarea id="tpl-desc" style="display:none;"></textarea>
           </div>
         </div>
-        <button class="btn full" onclick="createTemplate()">Create template</button>
+        <button class="btn full" id="tpl-submit-btn" onclick="createTemplate()">Create template</button>
+        <button class="btn secondary full" id="tpl-cancel-btn" style="display:none;margin-top:8px;" onclick="cancelEdit('tpl')">Cancel edit</button>
         <div class="status" id="tpl-create-status"></div>
       </section>
 
@@ -252,14 +253,11 @@
             <textarea id="st-desc" style="display:none;"></textarea>
           </div>
         </div>
-        <button class="btn full" onclick="addShiftType()">Add shift type</button>
+        <button class="btn full" id="st-submit-btn" onclick="addShiftType()">Add shift type</button>
+        <button class="btn secondary full" id="st-cancel-btn" style="display:none;margin-top:8px;" onclick="cancelEdit('st')">Cancel edit</button>
         <div class="status" id="st-status"></div>
-        <div class="chip-list" id="shift-type-list"></div>
-
-        <div id="template-section" style="margin-top:16px;display:none;">
-          <p class="help" style="margin-top:0;">Shared templates — add one of these to your list instead of typing it from scratch:</p>
-          <div class="chip-list" id="template-list"></div>
-        </div>
+        <div id="own-shift-type-list"></div>
+        <div id="template-shift-type-list" style="margin-top:14px;"></div>
       </section>
 
       <section>
@@ -339,9 +337,10 @@ let isAdmin = false;
 let isSignup = false;
 let recentColors = [];
 let legBuilders = { st: [], tpl: [] };
+let editingItem = { st: null, tpl: null };
 
 function addLegRow(prefix){
-  legBuilders[prefix].push({ start:'', end:'', route:'', notes:'' });
+  legBuilders[prefix].push({ start:'', end:'', route:'', notes:'', extra:'' });
   renderLegRows(prefix);
 }
 
@@ -371,9 +370,14 @@ function renderLegRows(prefix){
     routeInput.oninput = ()=>{ leg.route = routeInput.value; compileDutyBoard(prefix); };
 
     const notesInput = document.createElement('input');
-    notesInput.type = 'text'; notesInput.className = 'leg-notes'; notesInput.placeholder = 'From → To / notes';
+    notesInput.type = 'text'; notesInput.className = 'leg-notes'; notesInput.placeholder = 'From → To';
     notesInput.value = leg.notes;
     notesInput.oninput = ()=>{ leg.notes = notesInput.value; compileDutyBoard(prefix); };
+
+    const extraInput = document.createElement('input');
+    extraInput.type = 'text'; extraInput.className = 'leg-notes'; extraInput.placeholder = 'Other notes, e.g. hand over at...';
+    extraInput.value = leg.extra || '';
+    extraInput.oninput = ()=>{ leg.extra = extraInput.value; compileDutyBoard(prefix); };
 
     const removeBtn = document.createElement('button');
     removeBtn.className = 'leg-remove'; removeBtn.textContent = '×'; removeBtn.type = 'button';
@@ -383,6 +387,7 @@ function renderLegRows(prefix){
     row.appendChild(endInput);
     row.appendChild(routeInput);
     row.appendChild(notesInput);
+    row.appendChild(extraInput);
     row.appendChild(removeBtn);
     container.appendChild(row);
   });
@@ -429,9 +434,13 @@ function compileDutyBoard(prefix){
   let totalLegMinutes = 0;
   for(let i=0; i<timed.length; i++){
     const leg = timed[i];
-    totalLegMinutes += (leg.endAbs - leg.startAbs);
+    const legMinutes = leg.endAbs - leg.startAbs;
+    totalLegMinutes += legMinutes;
     const label = [leg.route, leg.notes].filter(Boolean).join(' · ');
-    lines.push(formatClock(leg.startAbs) + '–' + formatClock(leg.endAbs) + (label ? '  ' + label : ''));
+    let line = formatClock(leg.startAbs) + '–' + formatClock(leg.endAbs) + ' (' + formatDuration(legMinutes) + ')';
+    if(label) line += '  ' + label;
+    if(leg.extra) line += '  — ' + leg.extra;
+    lines.push(line);
 
     if(i < timed.length - 1){
       const gap = timed[i+1].startAbs - leg.endAbs;
@@ -607,7 +616,6 @@ async function loadAccountData(){
   document.getElementById('rota-start').value = rotaStart;
   document.getElementById('weeks-select').value = String(weeks);
   renderShiftTypeList();
-  renderTemplateList();
   renderTemplatesBrowseList();
   renderGrid();
   renderOriginalGrid();
@@ -624,28 +632,36 @@ async function addShiftType(){
   const paidHours = document.getElementById('st-paid').value.trim();
   const description = document.getElementById('st-desc').value.trim();
   const color = document.getElementById('st-color').value;
+  const legsData = legBuilders.st;
 
-  const { data, error } = await sb.from('shift_types').insert({
-    owner_id: currentUser.id, is_template: false, name,
+  const payload = {
+    is_template: false, name,
     all_day: allDay, start_time: start, end_time: end,
-    paid_hours: paidHours, description, color
-  }).select().single();
+    paid_hours: paidHours, description, color, legs_data: legsData
+  };
+
+  let result;
+  if(editingItem.st){
+    result = await sb.from('shift_types').update(payload).eq('id', editingItem.st).select().single();
+  } else {
+    result = await sb.from('shift_types').insert({ ...payload, owner_id: currentUser.id }).select().single();
+  }
+  const { data, error } = result;
 
   if(error){
     statusEl.style.color = 'var(--danger)';
     statusEl.textContent = error.message;
     return;
   }
-  shiftTypes.push(data);
+  if(editingItem.st){
+    shiftTypes = shiftTypes.map(s => s.id === data.id ? data : s);
+  } else {
+    shiftTypes.push(data);
+  }
   rememberColor(color);
-  document.getElementById('st-name').value = '';
-  document.getElementById('st-paid').value = '';
-  legBuilders.st = [];
-  renderLegRows('st');
-  document.getElementById('st-allday').checked = false;
-  document.getElementById('st-time-row').style.display = 'flex';
+  cancelEdit('st');
   statusEl.style.color = 'var(--teal)';
-  statusEl.textContent = 'Added.';
+  statusEl.textContent = editingItem.st ? 'Updated.' : 'Added.';
   renderShiftTypeList();
   renderGrid();
 }
@@ -662,7 +678,8 @@ async function addTemplateToMine(tpl){
   const { data, error } = await sb.from('shift_types').insert({
     owner_id: currentUser.id, is_template: false, name: tpl.name,
     all_day: tpl.all_day, start_time: tpl.start_time, end_time: tpl.end_time,
-    paid_hours: tpl.paid_hours, description: tpl.description, color: tpl.color
+    paid_hours: tpl.paid_hours, description: tpl.description, color: tpl.color,
+    legs_data: tpl.legs_data, source_template_id: tpl.id
   }).select().single();
   if(!error){
     shiftTypes.push(data);
@@ -672,24 +689,94 @@ async function addTemplateToMine(tpl){
 }
 
 function renderShiftTypeList(){
-  const el = document.getElementById('shift-type-list');
-  el.innerHTML = '';
-  if(shiftTypes.length === 0){
-    el.innerHTML = '<p class="empty">No shift types yet — add your first one above.</p>';
+  const ownEl = document.getElementById('own-shift-type-list');
+  const tplEl = document.getElementById('template-shift-type-list');
+  const ownTypes = shiftTypes.filter(s => !s.source_template_id);
+  const fromTemplates = shiftTypes.filter(s => !!s.source_template_id);
+
+  ownEl.innerHTML = '<p class="help" style="margin-top:0;">My own shift types</p>';
+  if(ownTypes.length === 0){
+    ownEl.innerHTML += '<p class="empty">None yet — add one above.</p>';
   } else {
-    shiftTypes.forEach(s=>{
-      const div = document.createElement('div');
-      div.className = 'chip';
-      div.style.background = s.color || '#F2A93B';
-      const timeLabel = s.all_day ? 'no fixed time' : (s.start_time + '–' + s.end_time);
-      div.innerHTML = '<span>' + escapeHtml(s.name) + ' · ' + timeLabel + '</span>';
-      const btn = document.createElement('button');
-      btn.textContent = '×';
-      btn.onclick = ()=>removeShiftType(s.id);
-      div.appendChild(btn);
-      el.appendChild(div);
-    });
+    const list = document.createElement('div');
+    list.className = 'chip-list';
+    ownTypes.forEach(s => list.appendChild(buildShiftChip(s, false)));
+    ownEl.appendChild(list);
   }
+
+  if(fromTemplates.length === 0){
+    tplEl.innerHTML = '';
+  } else {
+    tplEl.innerHTML = '<p class="help" style="margin-top:0;">From shared templates (added via the Templates tab) — you can still edit your own copy</p>';
+    const list = document.createElement('div');
+    list.className = 'chip-list';
+    fromTemplates.forEach(s => list.appendChild(buildShiftChip(s, false)));
+    tplEl.appendChild(list);
+  }
+}
+
+function buildShiftChip(s, isTemplateRow){
+  const div = document.createElement('div');
+  div.className = 'chip';
+  div.style.background = s.color || '#F2A93B';
+  const timeLabel = s.all_day ? 'no fixed time' : (s.start_time + '–' + s.end_time);
+  const span = document.createElement('span');
+  span.textContent = s.name + ' · ' + timeLabel;
+  div.appendChild(span);
+  const editBtn = document.createElement('button');
+  editBtn.textContent = '✎';
+  editBtn.title = 'Edit';
+  editBtn.onclick = ()=> isTemplateRow ? startEditTemplate(s) : startEditShiftType(s);
+  div.appendChild(editBtn);
+  const delBtn = document.createElement('button');
+  delBtn.textContent = '×';
+  delBtn.onclick = ()=> isTemplateRow ? deleteTemplate(s.id) : removeShiftType(s.id);
+  div.appendChild(delBtn);
+  return div;
+}
+
+function startEditShiftType(s){
+  editingItem.st = s.id;
+  document.getElementById('st-name').value = s.name;
+  document.getElementById('st-color').value = s.color || '#F2A93B';
+  document.getElementById('st-allday').checked = s.all_day;
+  document.getElementById('st-time-row').style.display = s.all_day ? 'none' : 'flex';
+  document.getElementById('st-start').value = s.start_time || '09:00';
+  document.getElementById('st-end').value = s.end_time || '17:00';
+  document.getElementById('st-paid').value = s.paid_hours || '';
+  legBuilders.st = (s.legs_data && Array.isArray(s.legs_data)) ? JSON.parse(JSON.stringify(s.legs_data)) : [];
+  renderLegRows('st');
+  document.getElementById('st-submit-btn').textContent = 'Save changes';
+  document.getElementById('st-cancel-btn').style.display = 'block';
+  document.getElementById('st-name').scrollIntoView({behavior:'smooth', block:'center'});
+}
+
+function startEditTemplate(t){
+  editingItem.tpl = t.id;
+  document.getElementById('tpl-name').value = t.name;
+  document.getElementById('tpl-color').value = t.color || '#43C6AC';
+  document.getElementById('tpl-allday').checked = t.all_day;
+  document.getElementById('tpl-time-row').style.display = t.all_day ? 'none' : 'flex';
+  document.getElementById('tpl-start').value = t.start_time || '09:00';
+  document.getElementById('tpl-end').value = t.end_time || '17:00';
+  document.getElementById('tpl-paid').value = t.paid_hours || '';
+  legBuilders.tpl = (t.legs_data && Array.isArray(t.legs_data)) ? JSON.parse(JSON.stringify(t.legs_data)) : [];
+  renderLegRows('tpl');
+  document.getElementById('tpl-submit-btn').textContent = 'Save changes';
+  document.getElementById('tpl-cancel-btn').style.display = 'block';
+  document.getElementById('tpl-name').scrollIntoView({behavior:'smooth', block:'center'});
+}
+
+function cancelEdit(prefix){
+  editingItem[prefix] = null;
+  document.getElementById(prefix + '-name').value = '';
+  document.getElementById(prefix + '-paid').value = '';
+  document.getElementById(prefix + '-allday').checked = false;
+  document.getElementById(prefix + '-time-row').style.display = 'flex';
+  legBuilders[prefix] = [];
+  renderLegRows(prefix);
+  document.getElementById(prefix + '-submit-btn').textContent = prefix === 'st' ? 'Add shift type' : 'Create template';
+  document.getElementById(prefix + '-cancel-btn').style.display = 'none';
 }
 
 function renderTemplatesBrowseList(){
@@ -713,6 +800,11 @@ function renderTemplatesBrowseList(){
     addBtn.onclick = ()=>addTemplateToMine(t);
     btnGroup.appendChild(addBtn);
     if(isAdmin){
+      const editBtn = document.createElement('button');
+      editBtn.textContent = 'Edit';
+      editBtn.style.marginLeft = '10px';
+      editBtn.onclick = ()=>startEditTemplate(t);
+      btnGroup.appendChild(editBtn);
       const delBtn = document.createElement('button');
       delBtn.textContent = 'Delete';
       delBtn.style.marginLeft = '10px';
@@ -734,66 +826,48 @@ async function createTemplate(){
   const paidHours = document.getElementById('tpl-paid').value.trim();
   const description = document.getElementById('tpl-desc').value.trim();
   const color = document.getElementById('tpl-color').value;
+  const legsData = legBuilders.tpl;
 
-  const { data, error } = await sb.from('shift_types').insert({
-    owner_id: null, is_template: true, name,
+  const payload = {
+    is_template: true, name,
     all_day: allDay, start_time: start, end_time: end,
-    paid_hours: paidHours, description, color
-  }).select().single();
+    paid_hours: paidHours, description, color, legs_data: legsData
+  };
+
+  let result;
+  if(editingItem.tpl){
+    result = await sb.from('shift_types').update(payload).eq('id', editingItem.tpl).select().single();
+  } else {
+    result = await sb.from('shift_types').insert({ ...payload, owner_id: null }).select().single();
+  }
+  const { data, error } = result;
 
   if(error){
     statusEl.style.color = 'var(--danger)';
     statusEl.textContent = error.message;
     return;
   }
-  templates.push(data);
+  if(editingItem.tpl){
+    templates = templates.map(t => t.id === data.id ? data : t);
+  } else {
+    templates.push(data);
+  }
   rememberColor(color);
-  document.getElementById('tpl-name').value = '';
-  document.getElementById('tpl-paid').value = '';
-  legBuilders.tpl = [];
-  renderLegRows('tpl');
-  document.getElementById('tpl-allday').checked = false;
-  document.getElementById('tpl-time-row').style.display = 'flex';
+  cancelEdit('tpl');
   statusEl.style.color = 'var(--teal)';
-  statusEl.textContent = 'Template created.';
-  renderTemplateList();
+  statusEl.textContent = editingItem.tpl ? 'Template updated.' : 'Template created.';
   renderTemplatesBrowseList();
 }
 
 async function deleteTemplate(id){
   await sb.from('shift_types').delete().eq('id', id);
   templates = templates.filter(t => t.id !== id);
-  renderTemplateList();
   renderTemplatesBrowseList();
 }
 
 document.getElementById('tpl-allday') && document.getElementById('tpl-allday').addEventListener('change', (e)=>{
   document.getElementById('tpl-time-row').style.display = e.target.checked ? 'none' : 'flex';
 });
-
-function renderTemplateList(){
-  const section = document.getElementById('template-section');
-  const el = document.getElementById('template-list');
-  el.innerHTML = '';
-  if(templates.length === 0){
-    section.style.display = 'none';
-    return;
-  }
-  section.style.display = 'block';
-  templates.forEach(t=>{
-    const div = document.createElement('div');
-    div.className = 'chip';
-    div.style.background = t.color || '#43C6AC';
-    const timeLabel = t.all_day ? 'no fixed time' : (t.start_time + '–' + t.end_time);
-    div.innerHTML = '<span>' + escapeHtml(t.name) + ' · ' + timeLabel + '</span>';
-    const btn = document.createElement('button');
-    btn.textContent = '+';
-    btn.title = 'Add to my shift types';
-    btn.onclick = ()=>addTemplateToMine(t);
-    div.appendChild(btn);
-    el.appendChild(div);
-  });
-}
 
 function resizePatternArray(arr, newWeeks){
   const newLen = newWeeks * 7;
