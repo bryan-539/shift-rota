@@ -209,6 +209,7 @@
           </div>
         </div>
         <div id="calendar-income" style="margin-bottom:14px;"></div>
+        <div class="leg-summary" id="day-detail-panel" style="display:none;margin-bottom:14px;"></div>
         <div id="calendar-list"></div>
         <div id="calendar-grid"></div>
       </section>
@@ -280,6 +281,7 @@
           </div>
         </div>
         <div id="friend-calendar-list"></div>
+        <div class="leg-summary" id="friend-day-detail-panel" style="display:none;margin-top:14px;"></div>
       </section>
     </div>
     <div class="tab-panel" id="tab-templates">
@@ -303,6 +305,19 @@
         <div class="row">
           <div><label>Name</label><input type="text" id="tpl-name" placeholder="e.g. T01"></div>
           <div><label>Category (depot/location)</label><input type="text" id="tpl-category" placeholder="e.g. Matlock, Belper"></div>
+        </div>
+        <label>Allowed days</label>
+        <p class="help" style="margin-top:0;">Untick any day this shift should never be assigned to.</p>
+        <div class="row" id="tpl-allowed-days" style="margin-bottom:10px;">
+          <label class="checkbox-row" style="margin:0;"><input type="checkbox" id="tpl-day-0" checked> Sun</label>
+          <label class="checkbox-row" style="margin:0;"><input type="checkbox" id="tpl-day-1" checked> Mon</label>
+          <label class="checkbox-row" style="margin:0;"><input type="checkbox" id="tpl-day-2" checked> Tue</label>
+          <label class="checkbox-row" style="margin:0;"><input type="checkbox" id="tpl-day-3" checked> Wed</label>
+        </div>
+        <div class="row" style="margin-bottom:10px;">
+          <label class="checkbox-row" style="margin:0;"><input type="checkbox" id="tpl-day-4" checked> Thu</label>
+          <label class="checkbox-row" style="margin:0;"><input type="checkbox" id="tpl-day-5" checked> Fri</label>
+          <label class="checkbox-row" style="margin:0;"><input type="checkbox" id="tpl-day-6" checked> Sat</label>
         </div>
         <label>Colour</label>
         <div class="recent-colors" id="tpl-recent-colors"></div>
@@ -339,6 +354,19 @@
             <label>Filter by category</label>
             <select id="tpl-filter" onchange="renderTemplatesBrowseList()">
               <option value="">All categories</option>
+            </select>
+          </div>
+          <div style="max-width:160px;">
+            <label>Filter by day</label>
+            <select id="tpl-day-filter" onchange="renderTemplatesBrowseList()">
+              <option value="">All days</option>
+              <option value="0">Sun</option>
+              <option value="1">Mon</option>
+              <option value="2">Tue</option>
+              <option value="3">Wed</option>
+              <option value="4">Thu</option>
+              <option value="5">Fri</option>
+              <option value="6">Sat</option>
             </select>
           </div>
         </div>
@@ -707,6 +735,11 @@ function computeEffectiveShift(rotaObj, overridesArr, dateStr){
   return (rotaObj.original_pattern || [])[idx] || '';
 }
 
+function shiftTimeLabel(shift){
+  if(!shift || shift.all_day) return '';
+  return ' (' + shift.start_time + '–' + shift.end_time + ')';
+}
+
 function renderFriendCalendar(){
   const listEl = document.getElementById('friend-calendar-list');
   if(!listEl || !selectedFriend) return;
@@ -723,6 +756,8 @@ function renderFriendCalendar(){
   else end.setMonth(end.getMonth() + parseInt(rangeVal,10));
 
   listEl.innerHTML = '';
+  const friendDetailPanel = document.getElementById('friend-day-detail-panel');
+  if(friendDetailPanel) friendDetailPanel.style.display = 'none';
   const cursor = new Date(today);
   const myRota = { rota_start: rotaStart, weeks: weeks, original_pattern: pattern };
 
@@ -734,26 +769,87 @@ function renderFriendCalendar(){
 
     const row = document.createElement('div');
     row.className = 'off-item';
+    row.style.cursor = 'pointer';
     const dateLabel = cursor.toLocaleDateString(undefined, {weekday:'short', day:'numeric', month:'short'});
     let label = dateLabel + ' — ';
 
     if(compare){
       const myShiftId = computeEffectiveShift(myRota, allOverrides, key);
+      const myShift = shiftTypes.find(s => s.id === myShiftId);
       const myWorking = !!myShiftId && myShiftId !== '__holiday__';
-      if(myWorking && friendWorking) label += 'Both working';
-      else if(!myWorking && !friendWorking) label += 'Both off';
-      else if(myWorking && !friendWorking) label += 'You working, they\'re off';
-      else label += 'They\'re working, you\'re off';
+      if(myWorking && friendWorking){
+        label += 'Both working — You' + shiftTimeLabel(myShift) + ', them' + shiftTimeLabel(friendShift);
+        row.style.background = 'rgba(226,87,76,0.18)';
+        row.style.borderColor = 'var(--danger)';
+      } else if(!myWorking && !friendWorking){
+        label += 'Both off';
+        row.style.background = 'rgba(67,198,172,0.18)';
+        row.style.borderColor = 'var(--teal)';
+      } else if(myWorking && !friendWorking){
+        label += 'You working' + shiftTimeLabel(myShift) + ', they\'re off';
+        row.style.background = 'rgba(224,143,79,0.18)';
+        row.style.borderColor = '#E08F4F';
+      } else {
+        label += 'They\'re working' + shiftTimeLabel(friendShift) + ', you\'re off';
+        row.style.background = 'rgba(242,169,59,0.18)';
+        row.style.borderColor = 'var(--amber)';
+      }
     } else {
       if(friendShiftId === '__holiday__') label += 'Holiday';
-      else if(friendShift) label += friendShift.name;
+      else if(friendShift) label += friendShift.name + shiftTimeLabel(friendShift);
       else label += '—';
     }
 
     row.innerHTML = '<span>' + label + '</span>';
+    row.onclick = ()=>showFriendDayDetail(key, friendShift, friendShiftId);
     listEl.appendChild(row);
     cursor.setDate(cursor.getDate()+1);
   }
+}
+
+function buildDayDetailHTML(dateStr, shift, shiftId, ownerPrefix){
+  const dateObj = new Date(dateStr + 'T00:00:00');
+  const dateLabel = dateObj.toLocaleDateString(undefined, {weekday:'long', day:'numeric', month:'long', year:'numeric'});
+  let html = '<p style="margin:0 0 8px;font-weight:600;color:var(--text);">' + ownerPrefix + dateLabel + '</p>';
+  if(shiftId === '__holiday__'){
+    html += '<p class="help" style="margin:0;">Holiday</p>';
+  } else if(shift){
+    html += '<p class="help" style="margin:0 0 4px;"><strong style="color:var(--text);">' + escapeHtml(shift.name) + '</strong>' + shiftTimeLabel(shift) + '</p>';
+    if(shift.paid_hours) html += '<p class="help" style="margin:0 0 4px;">Paid hours: ' + escapeHtml(shift.paid_hours) + '</p>';
+    if(shift.description) html += '<div class="leg-summary" style="margin-top:8px;">' + escapeHtml(shift.description) + '</div>';
+    else html += '<p class="help" style="margin:6px 0 0;">No duty board details added for this shift.</p>';
+  } else {
+    html += '<p class="help" style="margin:0;">Rest day</p>';
+  }
+  return html;
+}
+
+function showDayDetail(dateStr){
+  const shiftId = effectiveShift(dateStr);
+  const shift = shiftTypes.find(s => s.id === shiftId);
+  const panel = document.getElementById('day-detail-panel');
+  if(!panel) return;
+  panel.innerHTML = buildDayDetailHTML(dateStr, shift, shiftId, 'My — ') +
+    '<button class="btn secondary full" style="margin-top:10px;" onclick="closeDayDetail()">Close</button>';
+  panel.style.display = 'block';
+  panel.scrollIntoView({behavior:'smooth', block:'center'});
+}
+
+function closeDayDetail(){
+  document.getElementById('day-detail-panel').style.display = 'none';
+}
+
+function showFriendDayDetail(dateStr, shift, shiftId){
+  const panel = document.getElementById('friend-day-detail-panel');
+  if(!panel) return;
+  panel.innerHTML = buildDayDetailHTML(dateStr, shift, shiftId, friendLabel(selectedFriend) + "'s — ") +
+    '<button class="btn secondary full" style="margin-top:10px;" onclick="closeFriendDayDetail()">Close</button>';
+  panel.style.display = 'block';
+  panel.scrollIntoView({behavior:'smooth', block:'center'});
+}
+
+function closeFriendDayDetail(){
+  document.getElementById('friend-day-detail-panel').style.display = 'none';
 }
 
 async function loadBankHolidays(){
@@ -1119,7 +1215,7 @@ async function addTemplateToMine(tpl){
     owner_id: currentUser.id, is_template: false, name: tpl.name,
     all_day: tpl.all_day, start_time: tpl.start_time, end_time: tpl.end_time,
     paid_hours: tpl.paid_hours, description: tpl.description, color: tpl.color,
-    legs_data: tpl.legs_data, source_template_id: tpl.id
+    legs_data: tpl.legs_data, source_template_id: tpl.id, allowed_days: tpl.allowed_days
   }).select().single();
   if(!error){
     shiftTypes.push(data);
@@ -1157,6 +1253,7 @@ function copyFromExisting(prefix){
   document.getElementById(prefix + '-paid').value = source.paid_hours || '';
   if(prefix === 'tpl'){
     document.getElementById('tpl-category').value = source.category || '';
+    setAllowedDaysOnForm(source.allowed_days);
   }
   legBuilders[prefix] = (source.legs_data && Array.isArray(source.legs_data)) ? JSON.parse(JSON.stringify(source.legs_data)) : [];
   renderLegRows(prefix);
@@ -1237,6 +1334,7 @@ function startEditTemplate(t){
   document.getElementById('tpl-end').value = t.end_time || '17:00';
   document.getElementById('tpl-paid').value = t.paid_hours || '';
   document.getElementById('tpl-category').value = t.category || '';
+  setAllowedDaysOnForm(t.allowed_days);
   legBuilders.tpl = (t.legs_data && Array.isArray(t.legs_data)) ? JSON.parse(JSON.stringify(t.legs_data)) : [];
   renderLegRows('tpl');
   document.getElementById('tpl-submit-btn').textContent = 'Save changes';
@@ -1248,7 +1346,10 @@ function cancelEdit(prefix){
   editingItem[prefix] = null;
   document.getElementById(prefix + '-name').value = '';
   document.getElementById(prefix + '-paid').value = '';
-  if(prefix === 'tpl') document.getElementById('tpl-category').value = '';
+  if(prefix === 'tpl'){
+    document.getElementById('tpl-category').value = '';
+    setAllowedDaysOnForm(null);
+  }
   const copySel = document.getElementById(prefix + '-copy-from');
   if(copySel) copySel.value = '';
   document.getElementById(prefix + '-allday').checked = false;
@@ -1272,21 +1373,34 @@ function renderTemplatesBrowseList(){
   filterSelect.value = categories.includes(currentFilter) ? currentFilter : '';
 
   const activeFilter = filterSelect.value;
-  const visible = activeFilter ? templates.filter(t => t.category === activeFilter) : templates;
+  let visible = activeFilter ? templates.filter(t => t.category === activeFilter) : templates;
+
+  const dayFilterSelect = document.getElementById('tpl-day-filter');
+  const activeDayFilter = dayFilterSelect.value;
+  if(activeDayFilter !== ''){
+    const dayIdx = parseInt(activeDayFilter, 10);
+    visible = visible.filter(t => !t.allowed_days || t.allowed_days[dayIdx] !== false);
+  }
 
   if(visible.length === 0){
     el.innerHTML = '<p class="empty">' + (templates.length === 0
       ? ('No templates yet' + (isAdmin ? ' — create your first one above.' : ' — check back later.'))
-      : 'No templates in this category.') + '</p>';
+      : 'No templates match these filters.') + '</p>';
     return;
   }
+  const dayShortNames = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
   visible.forEach(t=>{
     const div = document.createElement('div');
     div.className = 'off-item';
     const timeLabel = t.all_day ? 'no fixed time' : (t.start_time + '–' + t.end_time);
     const swatch = '<span style="display:inline-block;width:12px;height:12px;border-radius:3px;background:' + (t.color || '#43C6AC') + ';margin-right:8px;"></span>';
     const catBadge = t.category ? ' <span style="color:var(--amber);font-size:11px;">· ' + escapeHtml(t.category) + '</span>' : '';
-    div.innerHTML = '<span>' + swatch + escapeHtml(t.name) + ' · ' + timeLabel + (t.paid_hours ? ' · paid ' + t.paid_hours : '') + catBadge + '</span>';
+    let dayBadge = '';
+    if(t.allowed_days && Array.isArray(t.allowed_days) && t.allowed_days.some(v => v === false)){
+      const allowedNames = dayShortNames.filter((_, i) => t.allowed_days[i] !== false);
+      dayBadge = ' <span style="color:var(--text-dim);font-size:11px;">· ' + allowedNames.join('/') + ' only</span>';
+    }
+    div.innerHTML = '<span>' + swatch + escapeHtml(t.name) + ' · ' + timeLabel + (t.paid_hours ? ' · paid ' + t.paid_hours : '') + catBadge + dayBadge + '</span>';
     const btnGroup = document.createElement('span');
     const addBtn = document.createElement('button');
     addBtn.textContent = 'Add to mine';
@@ -1310,6 +1424,21 @@ function renderTemplatesBrowseList(){
   });
 }
 
+function getAllowedDaysFromForm(){
+  const arr = [];
+  for(let i=0; i<7; i++){
+    arr.push(document.getElementById('tpl-day-' + i).checked);
+  }
+  return arr;
+}
+
+function setAllowedDaysOnForm(allowedDays){
+  const arr = (allowedDays && Array.isArray(allowedDays)) ? allowedDays : [true,true,true,true,true,true,true];
+  for(let i=0; i<7; i++){
+    document.getElementById('tpl-day-' + i).checked = arr[i] !== false;
+  }
+}
+
 async function createTemplate(){
   const statusEl = document.getElementById('tpl-create-status');
   const name = document.getElementById('tpl-name').value.trim();
@@ -1322,11 +1451,12 @@ async function createTemplate(){
   const color = document.getElementById('tpl-color').value;
   const category = document.getElementById('tpl-category').value.trim();
   const legsData = legBuilders.tpl;
+  const allowedDays = getAllowedDaysFromForm();
 
   const payload = {
     is_template: true, name,
     all_day: allDay, start_time: start, end_time: end,
-    paid_hours: paidHours, description, color, legs_data: legsData, category
+    paid_hours: paidHours, description, color, legs_data: legsData, category, allowed_days: allowedDays
   };
 
   let result;
@@ -1502,6 +1632,7 @@ function renderGrid(){
     });
     for(let d=0; d<7; d++){
       const idx = w*7 + d;
+      const realWeekday = (weekStartDay + d) % 7;
       const cell = document.createElement('div');
       const sel = document.createElement('select');
       sel.dataset.idx = idx;
@@ -1509,13 +1640,16 @@ function renderGrid(){
       blankOpt.value = '';
       blankOpt.textContent = '—';
       sel.appendChild(blankOpt);
+      const currentValue = pattern[idx] || '';
       shiftTypes.forEach(s=>{
+        const allowed = !s.allowed_days || s.allowed_days[realWeekday] !== false;
+        if(!allowed && s.id !== currentValue) return; // hide disallowed options, but never hide the day's existing assignment
         const opt = document.createElement('option');
         opt.value = s.id;
-        opt.textContent = s.name;
+        opt.textContent = s.name + (allowed ? '' : ' (not allowed this day)');
         sel.appendChild(opt);
       });
-      sel.value = pattern[idx] || '';
+      sel.value = currentValue;
       styleSelect(sel);
       sel.addEventListener('change', ()=>{
         pattern[idx] = sel.value;
@@ -1756,6 +1890,8 @@ function renderCalendarTab(){
 
   listEl.style.display = viewMode === 'list' ? 'block' : 'none';
   gridEl.style.display = viewMode === 'grid' ? '' : 'none';
+  const detailPanel = document.getElementById('day-detail-panel');
+  if(detailPanel) detailPanel.style.display = 'none';
   listEl.innerHTML = '';
   gridEl.innerHTML = '';
   gridEl.className = viewMode === 'grid' ? 'grid' : '';
@@ -1784,7 +1920,7 @@ function renderCalendarTab(){
         label += ' — Holiday';
       } else if(shift){
         swatch = '<span style="display:inline-block;width:10px;height:10px;border-radius:3px;background:' + (shift.color||'#F2A93B') + ';margin-right:6px;"></span>';
-        label += ' — ' + shift.name;
+        label += ' — ' + shift.name + shiftTimeLabel(shift);
         if(payRates.enabled) label += ' (£' + dayPay.toFixed(2) + ')';
       } else {
         label += ' — —';
@@ -1792,6 +1928,8 @@ function renderCalendarTab(){
       if(isBankHoliday) label += ' 🎉 Bank holiday';
       if(ov && (ov.source === 'self_swap' || ov.source === 'friend_swap')) label += ' ⇄ changed';
       if(ov && ov.tentative) label += ' ⏳';
+      row.style.cursor = 'pointer';
+      row.onclick = ()=>showDayDetail(key);
       row.innerHTML = '<span>' + swatch + label + '</span>';
       listEl.appendChild(row);
     } else {
@@ -1816,6 +1954,8 @@ function renderCalendarTab(){
       const cell = document.createElement('div');
       cell.className = 'day-cell-readonly';
       cell.title = cursor.toLocaleDateString();
+      cell.style.cursor = 'pointer';
+      cell.onclick = ()=>showDayDetail(key);
       if(isBankHoliday) cell.style.outline = '2px solid var(--amber)';
       let inner = String(cursor.getDate());
       if(isHoliday){
@@ -1825,7 +1965,7 @@ function renderCalendarTab(){
       } else if(shift){
         cell.style.background = shift.color || '#F2A93B';
         cell.style.color = '#1B1E26';
-        inner += '<span class="pay-line">' + escapeHtml(shift.name) + (payRates.enabled ? ' £'+dayPay.toFixed(2) : '') + '</span>';
+        inner += '<span class="pay-line">' + escapeHtml(shift.name) + escapeHtml(shiftTimeLabel(shift)) + (payRates.enabled ? ' £'+dayPay.toFixed(2) : '') + '</span>';
       } else {
         inner += '<span class="pay-line">—</span>';
       }
