@@ -48,6 +48,9 @@
   .help{font-size:12px;color:var(--text-dim);line-height:1.5;margin-top:10px;}
   .status{font-size:12px;min-height:16px;margin-top:8px;}
   .empty{color:var(--text-dim);font-size:13px;}
+  .off-item{display:flex;align-items:center;justify-content:space-between;background:var(--surface-alt);border:1px solid var(--border);border-radius:7px;padding:8px 10px;font-size:13px;margin-bottom:8px;}
+  .off-item button{background:none;border:none;color:var(--danger);cursor:pointer;font-size:13px;font-weight:600;}
+  .day-cell-readonly{padding:8px 4px;font-size:11px;text-align:center;border-radius:6px;font-weight:600;background:var(--surface-alt);color:var(--text-dim);}
 
   /* Auth screen */
   #auth-screen{max-width:380px;margin:60px auto 0;padding:0 16px;}
@@ -112,7 +115,27 @@
       <div class="coming-soon"><span class="eyebrow">Coming soon</span>My Calendar — your live view with holidays, swaps and bank holidays highlighted.</div>
     </div>
     <div class="tab-panel" id="tab-original">
-      <div class="coming-soon"><span class="eyebrow">Coming soon</span>Original Rota — your contracted pattern, with booked holidays listed separately.</div>
+      <header style="margin-bottom:16px;">
+        <p class="eyebrow">Original Rota</p>
+        <h1>Your contracted pattern</h1>
+        <p class="sub">This is your rota exactly as set up in Account &amp; Setup — no holidays or swaps applied. Booked holidays are listed separately below.</p>
+      </header>
+
+      <section>
+        <p class="sec-title">5-week pattern</p>
+        <div id="original-grid"></div>
+      </section>
+
+      <section>
+        <p class="sec-title">Booked holidays</p>
+        <div class="row">
+          <div><label>First day</label><input type="date" id="orig-hol-start"></div>
+          <div><label>Last day</label><input type="date" id="orig-hol-end"></div>
+        </div>
+        <button class="btn secondary full" onclick="bookHolidayFromOriginal()">Book holiday</button>
+        <div class="status" id="orig-hol-status"></div>
+        <div id="original-holiday-list" style="margin-top:12px;"></div>
+      </section>
     </div>
     <div class="tab-panel" id="tab-friends">
       <div class="coming-soon"><span class="eyebrow">Coming soon</span>Friends — search, add, and view their updated rota side-by-side with yours.</div>
@@ -187,6 +210,7 @@ let shiftTypes = [];     // personal shift types
 let templates = [];      // admin templates (is_template = true)
 let pattern = Array(35).fill('');
 let rotaStart = '';
+let holidays = []; // override rows where value === '__holiday__'
 let isSignup = false;
 
 // ---------- AUTH ----------
@@ -265,13 +289,15 @@ document.getElementById('st-allday').addEventListener('change', (e)=>{
 });
 
 async function loadAccountData(){
-  const [stRes, tplRes, rotaRes] = await Promise.all([
+  const [stRes, tplRes, rotaRes, holRes] = await Promise.all([
     sb.from('shift_types').select('*').eq('owner_id', currentUser.id),
     sb.from('shift_types').select('*').eq('is_template', true),
-    sb.from('rota_settings').select('*').eq('user_id', currentUser.id).maybeSingle()
+    sb.from('rota_settings').select('*').eq('user_id', currentUser.id).maybeSingle(),
+    sb.from('overrides').select('*').eq('user_id', currentUser.id).eq('value', '__holiday__').order('override_date')
   ]);
   shiftTypes = stRes.data || [];
   templates = tplRes.data || [];
+  holidays = holRes.data || [];
   if(rotaRes.data){
     rotaStart = rotaRes.data.rota_start || '';
     pattern = rotaRes.data.original_pattern || Array(35).fill('');
@@ -283,6 +309,8 @@ async function loadAccountData(){
   renderShiftTypeList();
   renderTemplateList();
   renderGrid();
+  renderOriginalGrid();
+  renderHolidayList();
 }
 
 async function addShiftType(){
@@ -425,6 +453,109 @@ function renderGrid(){
       grid.appendChild(cell);
     }
   }
+  renderOriginalGrid();
+}
+
+function renderOriginalGrid(){
+  const grid = document.getElementById('original-grid');
+  if(!grid) return;
+  grid.innerHTML = '';
+  grid.className = 'grid';
+  for(let w=0; w<5; w++){
+    const marker = document.createElement('div');
+    marker.className = 'week-marker';
+    marker.textContent = 'Week ' + (w+1);
+    grid.appendChild(marker);
+    DAY_LABELS.forEach(d=>{
+      const lbl = document.createElement('div');
+      lbl.className = 'day-label';
+      lbl.textContent = d;
+      grid.appendChild(lbl);
+    });
+    for(let d=0; d<7; d++){
+      const idx = w*7 + d;
+      const cell = document.createElement('div');
+      cell.className = 'day-cell-readonly';
+      const shiftId = pattern[idx];
+      const shift = shiftTypes.find(s=>s.id===shiftId);
+      if(shift){
+        cell.textContent = shift.name;
+        cell.style.background = shift.color || '#F2A93B';
+        cell.style.color = '#1B1E26';
+      } else {
+        cell.textContent = '—';
+      }
+      grid.appendChild(cell);
+    }
+  }
+}
+
+function renderHolidayList(){
+  const el = document.getElementById('original-holiday-list');
+  if(!el) return;
+  el.innerHTML = '';
+  if(holidays.length === 0){
+    el.innerHTML = '<p class="empty">No holidays booked yet.</p>';
+    return;
+  }
+  holidays.forEach(h=>{
+    const div = document.createElement('div');
+    div.className = 'off-item';
+    const dateObj = new Date(h.override_date + 'T00:00:00');
+    const formatted = dateObj.toLocaleDateString(undefined, {weekday:'short', day:'numeric', month:'short', year:'numeric'});
+    div.innerHTML = '<span>' + formatted + '</span>';
+    const btn = document.createElement('button');
+    btn.textContent = 'Remove';
+    btn.onclick = ()=>removeHoliday(h.id);
+    div.appendChild(btn);
+    el.appendChild(div);
+  });
+}
+
+async function bookHolidayFromOriginal(){
+  const startVal = document.getElementById('orig-hol-start').value;
+  const endVal = document.getElementById('orig-hol-end').value;
+  const statusEl = document.getElementById('orig-hol-status');
+  if(!startVal || !endVal){
+    statusEl.style.color = 'var(--danger)';
+    statusEl.textContent = 'Pick a first day and a last day.';
+    return;
+  }
+  const start = new Date(startVal + 'T00:00:00');
+  const end = new Date(endVal + 'T00:00:00');
+  if(end < start){
+    statusEl.style.color = 'var(--danger)';
+    statusEl.textContent = 'Last day must be on or after the first day.';
+    return;
+  }
+  const rows = [];
+  const cursor = new Date(start);
+  while(cursor <= end){
+    const y = cursor.getFullYear(), m = String(cursor.getMonth()+1).padStart(2,'0'), d = String(cursor.getDate()).padStart(2,'0');
+    rows.push({ user_id: currentUser.id, override_date: y+'-'+m+'-'+d, value: '__holiday__', source: 'holiday' });
+    cursor.setDate(cursor.getDate()+1);
+  }
+  statusEl.style.color = 'var(--text-dim)';
+  statusEl.textContent = 'Booking…';
+  const { error } = await sb.from('overrides').upsert(rows, { onConflict: 'user_id,override_date' });
+  if(error){
+    statusEl.style.color = 'var(--danger)';
+    statusEl.textContent = error.message;
+    return;
+  }
+  document.getElementById('orig-hol-start').value = '';
+  document.getElementById('orig-hol-end').value = '';
+  statusEl.style.color = 'var(--teal)';
+  statusEl.textContent = 'Booked ' + rows.length + ' day' + (rows.length===1?'':'s') + ' of holiday.';
+  const { data } = await sb.from('overrides').select('*').eq('user_id', currentUser.id).eq('value', '__holiday__').order('override_date');
+  holidays = data || [];
+  renderHolidayList();
+}
+
+async function removeHoliday(id){
+  await sb.from('overrides').delete().eq('id', id);
+  holidays = holidays.filter(h => h.id !== id);
+  renderHolidayList();
 }
 
 function styleSelect(sel){
