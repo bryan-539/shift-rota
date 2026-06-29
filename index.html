@@ -51,6 +51,11 @@
   .off-item{display:flex;align-items:center;justify-content:space-between;background:var(--surface-alt);border:1px solid var(--border);border-radius:7px;padding:8px 10px;font-size:13px;margin-bottom:8px;}
   .off-item button{background:none;border:none;color:var(--danger);cursor:pointer;font-size:13px;font-weight:600;}
   .day-cell-readonly{padding:8px 4px;font-size:11px;text-align:center;border-radius:6px;font-weight:600;background:var(--surface-alt);color:var(--text-dim);}
+  .day-cell-readonly .pay-line{display:block;font-weight:400;font-size:10px;margin-top:2px;opacity:.85;}
+  .income-row{display:flex;justify-content:space-between;align-items:center;padding:6px 0;font-size:13px;color:var(--text-dim);}
+  .income-row strong{color:var(--text);font-weight:600;}
+  .income-row.total{border-top:1px solid var(--border);margin-top:4px;padding-top:10px;color:var(--text);}
+  .income-row.total strong{color:var(--amber);font-size:15px;}
 
   /* Auth screen */
   #auth-screen{max-width:380px;margin:60px auto 0;padding:0 16px;}
@@ -124,6 +129,7 @@
       <section>
         <p class="sec-title" id="original-pattern-title">Pattern</p>
         <div id="original-grid"></div>
+        <div id="original-income" style="margin-top:14px;"></div>
       </section>
 
       <section>
@@ -212,6 +218,28 @@
         <input type="date" id="rota-start">
       </section>
 
+      <section>
+        <p class="sec-title">4 · Pay</p>
+        <div class="checkbox-row">
+          <input type="checkbox" id="pay-enabled" onchange="togglePaySection()">
+          <label for="pay-enabled">Track my pay</label>
+        </div>
+        <div id="pay-rates-box" style="display:none;">
+          <p class="help" style="margin-top:0;margin-bottom:10px;">Set your £/hour for each day — different days can have different rates if your work pays more for weekends, for example.</p>
+          <div class="row">
+            <div><label>Sun</label><input type="text" inputmode="decimal" id="pay-sun" placeholder="0.00"></div>
+            <div><label>Mon</label><input type="text" inputmode="decimal" id="pay-mon" placeholder="0.00"></div>
+            <div><label>Tue</label><input type="text" inputmode="decimal" id="pay-tue" placeholder="0.00"></div>
+            <div><label>Wed</label><input type="text" inputmode="decimal" id="pay-wed" placeholder="0.00"></div>
+          </div>
+          <div class="row">
+            <div><label>Thu</label><input type="text" inputmode="decimal" id="pay-thu" placeholder="0.00"></div>
+            <div><label>Fri</label><input type="text" inputmode="decimal" id="pay-fri" placeholder="0.00"></div>
+            <div><label>Sat</label><input type="text" inputmode="decimal" id="pay-sat" placeholder="0.00"></div>
+          </div>
+        </div>
+      </section>
+
       <button class="btn full" onclick="saveOriginalRota()">Save my original rota</button>
       <div class="status" id="save-status"></div>
     </div>
@@ -231,6 +259,7 @@ let pattern = Array(35).fill('');
 let weeks = 5;
 let rotaStart = '';
 let holidays = []; // override rows where value === '__holiday__'
+let payRates = { enabled:false, sun:0, mon:0, tue:0, wed:0, thu:0, fri:0, sat:0 };
 let isSignup = false;
 
 // ---------- AUTH ----------
@@ -309,15 +338,30 @@ document.getElementById('st-allday').addEventListener('change', (e)=>{
 });
 
 async function loadAccountData(){
-  const [stRes, tplRes, rotaRes, holRes] = await Promise.all([
+  const [stRes, tplRes, rotaRes, holRes, payRes] = await Promise.all([
     sb.from('shift_types').select('*').eq('owner_id', currentUser.id),
     sb.from('shift_types').select('*').eq('is_template', true),
     sb.from('rota_settings').select('*').eq('user_id', currentUser.id).maybeSingle(),
-    sb.from('overrides').select('*').eq('user_id', currentUser.id).eq('value', '__holiday__').order('override_date')
+    sb.from('overrides').select('*').eq('user_id', currentUser.id).eq('value', '__holiday__').order('override_date'),
+    sb.from('pay_rates').select('*').eq('user_id', currentUser.id).maybeSingle()
   ]);
   shiftTypes = stRes.data || [];
   templates = tplRes.data || [];
   holidays = holRes.data || [];
+  if(payRes.data){
+    payRates = {
+      enabled: payRes.data.enabled || false,
+      sun: payRes.data.sun || 0, mon: payRes.data.mon || 0, tue: payRes.data.tue || 0,
+      wed: payRes.data.wed || 0, thu: payRes.data.thu || 0, fri: payRes.data.fri || 0, sat: payRes.data.sat || 0
+    };
+  } else {
+    payRates = { enabled:false, sun:0, mon:0, tue:0, wed:0, thu:0, fri:0, sat:0 };
+  }
+  document.getElementById('pay-enabled').checked = payRates.enabled;
+  ['sun','mon','tue','wed','thu','fri','sat'].forEach(k=>{
+    document.getElementById('pay-' + k).value = payRates[k] || '';
+  });
+  togglePaySection();
   if(rotaRes.data){
     rotaStart = rotaRes.data.rota_start || '';
     weeks = rotaRes.data.weeks || 5;
@@ -460,6 +504,85 @@ function changeWeeks(){
   weeks = newWeeks;
   renderGrid();
 }
+
+function togglePaySection(){
+  const on = document.getElementById('pay-enabled').checked;
+  document.getElementById('pay-rates-box').style.display = on ? 'block' : 'none';
+  payRates.enabled = on;
+  renderOriginalGrid();
+}
+
+function bindPayInputs(){
+  ['sun','mon','tue','wed','thu','fri','sat'].forEach(k=>{
+    const el = document.getElementById('pay-' + k);
+    if(el){
+      el.addEventListener('input', ()=>{
+        payRates[k] = parseFloat(el.value) || 0;
+        renderOriginalGrid();
+      });
+    }
+  });
+}
+bindPayInputs();
+
+function parseHM(str){
+  if(!str) return 0;
+  const parts = String(str).split(':');
+  if(parts.length !== 2) return 0;
+  const h = parseInt(parts[0],10) || 0;
+  const m = parseInt(parts[1],10) || 0;
+  return h + m/60;
+}
+
+function shiftPaidHours(shift){
+  if(!shift) return 0;
+  if(shift.paid_hours) return parseHM(shift.paid_hours);
+  if(shift.all_day || !shift.start_time || !shift.end_time) return 0;
+  const [sh, sm] = shift.start_time.split(':').map(Number);
+  const [eh, em] = shift.end_time.split(':').map(Number);
+  let startMin = sh*60+sm, endMin = eh*60+em;
+  if(endMin <= startMin) endMin += 24*60;
+  return (endMin-startMin)/60;
+}
+
+function rateForColumn(colIndex){
+  const keys = ['sun','mon','tue','wed','thu','fri','sat'];
+  return payRates[keys[colIndex]] || 0;
+}
+
+function shiftPay(shift, colIndex){
+  return shiftPaidHours(shift) * rateForColumn(colIndex);
+}
+
+function weekPay(weekIndex){
+  let total = 0;
+  for(let d=0; d<7; d++){
+    const shift = shiftTypes.find(s=>s.id===pattern[weekIndex*7+d]);
+    if(shift) total += shiftPay(shift, d);
+  }
+  return total;
+}
+
+function renderOriginalIncome(){
+  const el = document.getElementById('original-income');
+  if(!el) return;
+  if(!payRates.enabled){
+    el.innerHTML = '';
+    return;
+  }
+  let html = '';
+  let grand = 0;
+  for(let w=0; w<weeks; w++){
+    const pay = weekPay(w);
+    grand += pay;
+    html += '<div class="income-row"><span>Week ' + (w+1) + '</span><strong>£' + pay.toFixed(2) + '</strong></div>';
+  }
+  html += '<div class="income-row total"><span>' + weeks + '-week total</span><strong>£' + grand.toFixed(2) + '</strong></div>';
+  html += '<div class="income-row"><span>Average per week</span><strong>£' + (grand/weeks).toFixed(2) + '</strong></div>';
+  el.innerHTML = html;
+}
+
+function renderGrid(){
   const grid = document.getElementById('pattern-grid');
   grid.innerHTML = '';
   grid.className = 'grid';
@@ -527,15 +650,20 @@ function renderOriginalGrid(){
       const shiftId = pattern[idx];
       const shift = shiftTypes.find(s=>s.id===shiftId);
       if(shift){
-        cell.textContent = shift.name;
         cell.style.background = shift.color || '#F2A93B';
         cell.style.color = '#1B1E26';
+        let inner = escapeHtml(shift.name);
+        if(payRates.enabled){
+          inner += '<span class="pay-line">£' + shiftPay(shift, d).toFixed(2) + '</span>';
+        }
+        cell.innerHTML = inner;
       } else {
         cell.textContent = '—';
       }
       grid.appendChild(cell);
     }
   }
+  renderOriginalIncome();
 }
 
 function renderHolidayList(){
@@ -642,6 +770,17 @@ async function saveOriginalRota(){
   if(error){
     statusEl.style.color = 'var(--danger)';
     statusEl.textContent = error.message;
+    return;
+  }
+  const { error: payError } = await sb.from('pay_rates').upsert({
+    user_id: currentUser.id,
+    enabled: payRates.enabled,
+    sun: payRates.sun, mon: payRates.mon, tue: payRates.tue, wed: payRates.wed,
+    thu: payRates.thu, fri: payRates.fri, sat: payRates.sat
+  });
+  if(payError){
+    statusEl.style.color = 'var(--danger)';
+    statusEl.textContent = payError.message;
     return;
   }
   statusEl.style.color = 'var(--teal)';
