@@ -43,6 +43,8 @@
   .leg-row input[type=time]{flex:0 0 90px;}
   .leg-row input.leg-route{flex:0 0 110px;}
   .leg-row input.leg-notes{flex:1 1 160px;min-width:140px;}
+  .leg-row input.leg-loc{flex:1 1 90px;min-width:70px;}
+  .leg-row .leg-arrow{align-self:center;color:var(--text-dim);flex-shrink:0;}
   .leg-row button.leg-remove{
     flex:0 0 30px;height:38px;background:var(--surface-alt);border:1px solid var(--border);color:var(--danger);
     border-radius:7px;cursor:pointer;font-size:14px;
@@ -870,7 +872,9 @@ let legBuilders = { st: [], tpl: [] };
 let editingItem = { st: null, tpl: null };
 
 function addLegRow(prefix){
-  legBuilders[prefix].push({ start:'', end:'', route:'', notes:'', extra:'' });
+  const prev = legBuilders[prefix];
+  const prevTo = prev.length > 0 ? (prev[prev.length-1].to || '') : '';
+  legBuilders[prefix].push({ start:'', end:'', route:'', from: prevTo, to:'', extra:'' });
   renderLegRows(prefix);
 }
 
@@ -899,10 +903,25 @@ function renderLegRows(prefix){
     routeInput.value = leg.route;
     routeInput.oninput = ()=>{ leg.route = routeInput.value; compileDutyBoard(prefix); };
 
-    const notesInput = document.createElement('input');
-    notesInput.type = 'text'; notesInput.className = 'leg-notes'; notesInput.placeholder = 'From → To';
-    notesInput.value = leg.notes;
-    notesInput.oninput = ()=>{ leg.notes = notesInput.value; compileDutyBoard(prefix); };
+    // Migrate old single 'notes' field (e.g. "London → Birmingham") to separate from/to fields
+    if(leg.from === undefined && leg.to === undefined){
+      const parts = (leg.notes || '').split(/\s*→\s*/);
+      leg.from = parts[0] || '';
+      leg.to = parts[1] || '';
+    }
+
+    const fromInput = document.createElement('input');
+    fromInput.type = 'text'; fromInput.className = 'leg-loc'; fromInput.placeholder = 'From';
+    fromInput.value = leg.from || '';
+    fromInput.oninput = ()=>{ leg.from = fromInput.value; compileDutyBoard(prefix); };
+
+    const arrowSpan = document.createElement('span');
+    arrowSpan.className = 'leg-arrow'; arrowSpan.textContent = '→';
+
+    const toInput = document.createElement('input');
+    toInput.type = 'text'; toInput.className = 'leg-loc'; toInput.placeholder = 'To';
+    toInput.value = leg.to || '';
+    toInput.oninput = ()=>{ leg.to = toInput.value; compileDutyBoard(prefix); };
 
     const extraInput = document.createElement('input');
     extraInput.type = 'text'; extraInput.className = 'leg-notes'; extraInput.placeholder = 'Other notes, e.g. hand over at...';
@@ -916,7 +935,9 @@ function renderLegRows(prefix){
     row.appendChild(startInput);
     row.appendChild(endInput);
     row.appendChild(routeInput);
-    row.appendChild(notesInput);
+    row.appendChild(fromInput);
+    row.appendChild(arrowSpan);
+    row.appendChild(toInput);
     row.appendChild(extraInput);
     row.appendChild(removeBtn);
     container.appendChild(row);
@@ -971,7 +992,8 @@ function compileDutyBoard(prefix){
     const leg = timed[i];
     const legMinutes = leg.endAbs - leg.startAbs;
     totalLegMinutes += legMinutes;
-    const label = [leg.route, leg.notes].filter(Boolean).join(' · ');
+    const fromTo = [leg.from, leg.to].filter(Boolean).join(' → ');
+    const label = [leg.route, fromTo || leg.notes].filter(Boolean).join(' · ');
     let line = formatClock(leg.startAbs) + '–' + formatClock(leg.endAbs) + ' (' + formatDuration(legMinutes) + ')';
     if(label) line += '  ' + label;
     if(leg.extra) line += '  — ' + leg.extra;
