@@ -43,6 +43,8 @@
   .leg-row input[type=time]{flex:0 0 90px;}
   .leg-row input.leg-route{flex:0 0 110px;}
   .leg-row input.leg-notes{flex:1 1 160px;min-width:140px;}
+  .leg-row input.leg-loc{flex:1 1 90px;min-width:70px;}
+  .leg-row .leg-arrow{align-self:center;color:var(--text-dim);flex-shrink:0;}
   .leg-row button.leg-remove{
     flex:0 0 30px;height:38px;background:var(--surface-alt);border:1px solid var(--border);color:var(--danger);
     border-radius:7px;cursor:pointer;font-size:14px;
@@ -52,6 +54,8 @@
     font-family:'SF Mono',Consolas,monospace;font-size:12px;white-space:pre-wrap;color:var(--text-dim);margin-top:10px;
   }
   .leg-summary .gap-line{color:var(--amber);}
+  .leg-summary .pass-line{color:var(--teal);}
+  .leg-summary .warn-line{color:var(--danger);}
   input:focus, select:focus{outline:2px solid var(--amber);outline-offset:1px;}
   .row{display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;}
   .row > div{flex:1;min-width:90px;}
@@ -868,7 +872,9 @@ let legBuilders = { st: [], tpl: [] };
 let editingItem = { st: null, tpl: null };
 
 function addLegRow(prefix){
-  legBuilders[prefix].push({ start:'', end:'', route:'', notes:'', extra:'' });
+  const prev = legBuilders[prefix];
+  const prevTo = prev.length > 0 ? (prev[prev.length-1].to || '') : '';
+  legBuilders[prefix].push({ start:'', end:'', route:'', from: prevTo, to:'', extra:'' });
   renderLegRows(prefix);
 }
 
@@ -897,10 +903,25 @@ function renderLegRows(prefix){
     routeInput.value = leg.route;
     routeInput.oninput = ()=>{ leg.route = routeInput.value; compileDutyBoard(prefix); };
 
-    const notesInput = document.createElement('input');
-    notesInput.type = 'text'; notesInput.className = 'leg-notes'; notesInput.placeholder = 'From → To';
-    notesInput.value = leg.notes;
-    notesInput.oninput = ()=>{ leg.notes = notesInput.value; compileDutyBoard(prefix); };
+    // Migrate old single 'notes' field (e.g. "London → Birmingham") to separate from/to fields
+    if(leg.from === undefined && leg.to === undefined){
+      const parts = (leg.notes || '').split(/\s*→\s*/);
+      leg.from = parts[0] || '';
+      leg.to = parts[1] || '';
+    }
+
+    const fromInput = document.createElement('input');
+    fromInput.type = 'text'; fromInput.className = 'leg-loc'; fromInput.placeholder = 'From';
+    fromInput.value = leg.from || '';
+    fromInput.oninput = ()=>{ leg.from = fromInput.value; compileDutyBoard(prefix); };
+
+    const arrowSpan = document.createElement('span');
+    arrowSpan.className = 'leg-arrow'; arrowSpan.textContent = '→';
+
+    const toInput = document.createElement('input');
+    toInput.type = 'text'; toInput.className = 'leg-loc'; toInput.placeholder = 'To';
+    toInput.value = leg.to || '';
+    toInput.oninput = ()=>{ leg.to = toInput.value; compileDutyBoard(prefix); };
 
     const extraInput = document.createElement('input');
     extraInput.type = 'text'; extraInput.className = 'leg-notes'; extraInput.placeholder = 'Other notes, e.g. hand over at...';
@@ -914,7 +935,9 @@ function renderLegRows(prefix){
     row.appendChild(startInput);
     row.appendChild(endInput);
     row.appendChild(routeInput);
-    row.appendChild(notesInput);
+    row.appendChild(fromInput);
+    row.appendChild(arrowSpan);
+    row.appendChild(toInput);
     row.appendChild(extraInput);
     row.appendChild(removeBtn);
     container.appendChild(row);
@@ -960,34 +983,76 @@ function compileDutyBoard(prefix){
 
   let lines = [];
   let totalLegMinutes = 0;
+  const BREAK_THRESHOLD = 30;    // minimum gap (min) that counts as a qualifying break
+  const CONTINUOUS_LIMIT = 330;  // 5h30m in minutes
+  let continuousDriving = 0;
+  let breakViolation = false;
+
   for(let i=0; i<timed.length; i++){
     const leg = timed[i];
     const legMinutes = leg.endAbs - leg.startAbs;
     totalLegMinutes += legMinutes;
-    const label = [leg.route, leg.notes].filter(Boolean).join(' · ');
+    const fromTo = [leg.from, leg.to].filter(Boolean).join(' → ');
+    const label = [leg.route, fromTo || leg.notes].filter(Boolean).join(' · ');
     let line = formatClock(leg.startAbs) + '–' + formatClock(leg.endAbs) + ' (' + formatDuration(legMinutes) + ')';
     if(label) line += '  ' + label;
     if(leg.extra) line += '  — ' + leg.extra;
     lines.push(line);
+    lines.push(''); // blank line after each leg entry
+
+    continuousDriving += legMinutes;
+    if(continuousDriving >= CONTINUOUS_LIMIT) breakViolation = true;
 
     if(i < timed.length - 1){
       const gap = timed[i+1].startAbs - leg.endAbs;
       if(gap > 0){
-        lines.push(formatClock(leg.endAbs) + '–' + formatClock(timed[i+1].startAbs) + '  Gap (' + formatDuration(gap) + ')');
+        lines.push('Gap (' + formatDuration(gap) + ')');
+      }
+      if(gap >= BREAK_THRESHOLD){
+        continuousDriving = 0;
       }
     }
   }
 
   const span = timed[timed.length-1].endAbs - timed[0].startAbs;
+
+  // First separator before totals (blank already provided by last leg's trailing '')
+  lines.push('----------');
   lines.push('');
-  lines.push('Total leg time: ' + formatDuration(totalLegMinutes));
-  lines.push('Total span (first start to last end): ' + formatDuration(span));
+  lines.push('Total drive time: ' + formatDuration(totalLegMinutes));
+  lines.push('Total span: ' + formatDuration(span));
+
+  // Second separator before compliance section
+  lines.push('');
+  lines.push('----------');
+  lines.push('');
+
+  // GB Domestic Hours compliance (applies to local bus routes under 50 km)
+  const driveFail = totalLegMinutes > 10 * 60;
+  const spanFail = span > 16 * 60;
+  if(driveFail){
+    lines.push('⚠️ Drive time exceeds 10hr daily limit');
+  }
+  if(spanFail){
+    lines.push('⚠️ Shift span exceeds 16hr limit');
+  }
+  if(breakViolation){
+    lines.push('⚠️ No 30-min break by 5:30 continuous driving');
+  }
+  if(!driveFail && !spanFail && !breakViolation){
+    lines.push('✅ Within GB domestic hours limits');
+  }
 
   const compiled = lines.join('\n');
   hiddenEl.value = compiled;
 
-  // Re-render summary with gap lines highlighted
-  summaryEl.innerHTML = lines.map(l => l.includes('Gap (') ? '<span class="gap-line">' + escapeHtml(l) + '</span>' : escapeHtml(l)).join('\n');
+  // Re-render summary with highlighted lines
+  summaryEl.innerHTML = lines.map(l => {
+    if(l.startsWith('⚠️')) return '<span class="warn-line">' + escapeHtml(l) + '</span>';
+    if(l.startsWith('✅')) return '<span class="pass-line">' + escapeHtml(l) + '</span>';
+    if(l.startsWith('Gap (')) return '<span class="gap-line">' + escapeHtml(l) + '</span>';
+    return escapeHtml(l);
+  }).join('\n');
 }
 
 function loadRecentColors(){
