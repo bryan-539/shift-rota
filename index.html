@@ -927,8 +927,14 @@ let editingItem = { st: null, tpl: null };
 
 function addLegRow(prefix){
   const prev = legBuilders[prefix];
-  const prevTo = prev.length > 0 ? (prev[prev.length-1].to || '') : '';
-  legBuilders[prefix].push({ start:'', end:'', route:'', from: prevTo, to:'', extra:'' });
+  const last = prev.length > 0 ? prev[prev.length-1] : null;
+  legBuilders[prefix].push({
+    start: last ? (last.end || '') : '',
+    end:'',
+    route: last ? (last.route || '') : '',
+    from: last ? (last.to || '') : '',
+    to:'', extra:''
+  });
   renderLegRows(prefix);
 }
 
@@ -939,7 +945,13 @@ function removeLegRow(prefix, idx){
 
 function insertLegRow(prefix, idx){
   const current = legBuilders[prefix][idx];
-  const newLeg = { start:'', end:'', route:'', from: current.to || '', to:'', extra:'' };
+  const newLeg = {
+    start: current.end || '',
+    end:'',
+    route: current.route || '',
+    from: current.to || '',
+    to:'', extra:''
+  };
   legBuilders[prefix].splice(idx + 1, 0, newLeg);
   renderLegRows(prefix);
 }
