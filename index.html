@@ -603,6 +603,7 @@ let profileCache = {}; // id -> profile, for friend display
 let selectedFriend = null; // profile of the friend currently being viewed
 let friendData = { rota: null, overrides: [], shiftTypes: [] };
 let allAdminProfiles = []; // loaded once per admin session for account management
+let adminEditRota = null; // { userId, weeks, weekStartDay, rotaStart, pattern, shiftTypes }
 // Rota template builder state (admin only)
 let rtplWeeks = 5;
 let rtplPattern = Array(35).fill('');
@@ -2647,6 +2648,23 @@ function showAdminEditProfile(p, parentDiv){
   parentDiv.appendChild(row1);
   parentDiv.appendChild(row2);
 
+  // Rota section
+  const rotaSep = document.createElement('hr');
+  rotaSep.style.cssText = 'border:none;border-top:1px solid var(--border);margin:8px 0;';
+  const rotaHead = document.createElement('p');
+  rotaHead.className = 'sec-title'; rotaHead.style.margin = '0 0 8px';
+  rotaHead.textContent = 'Rota';
+  const rotaEditor = document.createElement('div');
+  const loadRotaBtn = document.createElement('button');
+  loadRotaBtn.className = 'btn secondary';
+  loadRotaBtn.textContent = 'Load & edit rota';
+  loadRotaBtn.style.cssText = 'font-size:13px;padding:6px 12px;';
+  loadRotaBtn.onclick = () => loadAdminUserRota(p.id, rotaEditor, loadRotaBtn);
+  parentDiv.appendChild(rotaSep);
+  parentDiv.appendChild(rotaHead);
+  parentDiv.appendChild(loadRotaBtn);
+  parentDiv.appendChild(rotaEditor);
+
   saveBtn.onclick = async ()=>{
     const newUsername = usernameInput.value.trim().toLowerCase().replace(/[^a-z0-9_]/g,'');
     const newAdmin = adminCheck.checked;
@@ -2656,6 +2674,113 @@ function showAdminEditProfile(p, parentDiv){
     allAdminProfiles = allAdminProfiles.map(x => x.id===p.id ? { ...x, username:newUsername, is_admin:newAdmin } : x);
     renderAdminAccountList();
   };
+}
+
+async function loadAdminUserRota(userId, container, btn){
+  btn.textContent = 'Loading…'; btn.disabled = true;
+  const [rotaRes, stRes] = await Promise.all([
+    sb.from('rota_settings').select('*').eq('user_id', userId).maybeSingle(),
+    sb.from('shift_types').select('*').eq('owner_id', userId).eq('is_template', false).order('name')
+  ]);
+  btn.style.display = 'none';
+  const r = rotaRes.data;
+  const w = (r && r.weeks) || 5;
+  adminEditRota = {
+    userId,
+    weeks: w,
+    weekStartDay: (r && r.week_start_day != null) ? r.week_start_day : 1,
+    rotaStart: (r && r.rota_start) || '',
+    pattern: resizePatternArray((r && r.original_pattern) || [], w),
+    shiftTypes: stRes.data || []
+  };
+  renderAdminRotaGrid(container);
+}
+
+function renderAdminRotaGrid(container){
+  const ar = adminEditRota;
+  container.innerHTML = '';
+
+  if(ar.shiftTypes.length === 0){
+    const note = document.createElement('p');
+    note.className = 'help'; note.style.marginTop = '4px';
+    note.textContent = 'This user has no shift types — add some via their account first, then the grid will have options to choose from.';
+    container.appendChild(note);
+  }
+
+  // Controls
+  const ctrl = document.createElement('div');
+  ctrl.className = 'row'; ctrl.style.marginTop = '8px';
+
+  function mkWrap(label, maxW){ const d=document.createElement('div'); if(maxW)d.style.maxWidth=maxW; const l=document.createElement('label'); l.textContent=label; d.appendChild(l); return d; }
+
+  const startWrap = mkWrap('Start date', '160px');
+  const startInput = document.createElement('input');
+  startInput.type='date'; startInput.value=ar.rotaStart;
+  startInput.oninput=()=>{ ar.rotaStart=startInput.value; };
+  startWrap.appendChild(startInput);
+
+  const weeksWrap = mkWrap('Weeks', '110px');
+  const weeksSel = document.createElement('select');
+  for(let i=1;i<=8;i++){ const o=document.createElement('option'); o.value=i; o.textContent=i+' week'+(i>1?'s':''); if(i===ar.weeks)o.selected=true; weeksSel.appendChild(o); }
+  weeksSel.onchange=()=>{ const nw=parseInt(weeksSel.value,10); ar.pattern=resizePatternArray(ar.pattern,nw); ar.weeks=nw; renderAdminRotaGrid(container); };
+  weeksWrap.appendChild(weeksSel);
+
+  const wsdWrap = mkWrap('Week starts', '140px');
+  const wsdSel = document.createElement('select');
+  ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'].forEach((day,i)=>{ const o=document.createElement('option'); o.value=i; o.textContent=day; if(i===ar.weekStartDay)o.selected=true; wsdSel.appendChild(o); });
+  wsdSel.onchange=()=>{ ar.weekStartDay=parseInt(wsdSel.value,10); renderAdminRotaGrid(container); };
+  wsdWrap.appendChild(wsdSel);
+
+  ctrl.appendChild(startWrap); ctrl.appendChild(weeksWrap); ctrl.appendChild(wsdWrap);
+  container.appendChild(ctrl);
+
+  // Pattern grid
+  const grid = document.createElement('div');
+  grid.className = 'grid'; grid.style.marginBottom = '10px';
+
+  for(let w=0;w<ar.weeks;w++){
+    const marker=document.createElement('div'); marker.className='week-marker'; marker.textContent='Week '+(w+1); grid.appendChild(marker);
+    for(let d=0;d<7;d++){ const lbl=document.createElement('div'); lbl.className='day-label'; lbl.textContent=DAY_LABELS[(ar.weekStartDay+d)%7]; grid.appendChild(lbl); }
+    for(let d=0;d<7;d++){
+      const idx=w*7+d; const realWeekday=(ar.weekStartDay+d)%7;
+      const cell=document.createElement('div');
+      const sel=document.createElement('select');
+      const blank=document.createElement('option'); blank.value=''; blank.textContent='—'; sel.appendChild(blank);
+      const current=ar.pattern[idx]||'';
+      ar.shiftTypes.forEach(s=>{
+        const allowed=!s.allowed_days||s.allowed_days[realWeekday]!==false;
+        if(!allowed&&s.id!==current) return;
+        const opt=document.createElement('option'); opt.value=s.id; opt.textContent=s.name+(allowed?'':' (!)'); sel.appendChild(opt);
+      });
+      sel.value=current;
+      const styleSel=()=>{ const sh=ar.shiftTypes.find(s=>s.id===sel.value); if(sh){sel.style.background=sh.color||'#F2A93B';sel.style.color='#1B1E26';sel.style.border='none';}else{sel.style.background='var(--surface-alt)';sel.style.color='var(--text-dim)';sel.style.border='1px solid var(--border)';} };
+      styleSel();
+      sel.addEventListener('change',()=>{ ar.pattern[idx]=sel.value; styleSel(); });
+      cell.appendChild(sel); grid.appendChild(cell);
+    }
+  }
+  container.appendChild(grid);
+
+  const saveStatus = document.createElement('div');
+  saveStatus.className = 'status';
+  const saveBtn = document.createElement('button');
+  saveBtn.className = 'btn full'; saveBtn.textContent = 'Save rota';
+  saveBtn.onclick = async ()=>{
+    saveBtn.textContent='Saving…'; saveBtn.disabled=true;
+    const { error } = await sb.from('rota_settings').upsert({
+      user_id: ar.userId,
+      rota_start: ar.rotaStart || null,
+      weeks: ar.weeks,
+      week_start_day: ar.weekStartDay,
+      original_pattern: ar.pattern,
+      updated_at: new Date().toISOString()
+    }, { onConflict: 'user_id' });
+    saveBtn.textContent='Save rota'; saveBtn.disabled=false;
+    if(error){ saveStatus.style.color='var(--danger)'; saveStatus.textContent=error.message; }
+    else { saveStatus.style.color='var(--teal)'; saveStatus.textContent='Rota saved.'; }
+  };
+  container.appendChild(saveBtn);
+  container.appendChild(saveStatus);
 }
 
 async function wipeUserData(p){
