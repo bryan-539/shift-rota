@@ -857,10 +857,34 @@ function showDayDetail(dateStr){
   const shift = shiftTypes.find(s => s.id === shiftId);
   const panel = document.getElementById('day-detail-panel');
   if(!panel) return;
-  panel.innerHTML = buildDayDetailHTML(dateStr, shift, shiftId, 'My — ') +
+  const ov = allOverrides.find(o => o.override_date === dateStr);
+  const isChange = ov && (ov.source === 'self_swap' || ov.source === 'friend_swap');
+  let revertBtn = '';
+  if(isChange){
+    const originalId = patternShiftForDate(dateStr);
+    const originalShift = shiftTypes.find(s => s.id === originalId);
+    const originalLabel = originalId === '' ? 'Rest day' : (originalShift ? originalShift.name : 'original shift');
+    revertBtn = '<button class="btn secondary full" style="margin-top:10px;" onclick="revertDayToOriginal(\'' + dateStr + '\')">Revert to original (' + escapeHtml(originalLabel) + ')</button>';
+  }
+  panel.innerHTML = buildDayDetailHTML(dateStr, shift, shiftId, 'My — ') + revertBtn +
     '<button class="btn secondary full" style="margin-top:10px;" onclick="closeDayDetail()">Close</button>';
   panel.style.display = 'block';
   panel.scrollIntoView({behavior:'smooth', block:'center'});
+}
+
+async function revertDayToOriginal(dateStr){
+  const originalId = patternShiftForDate(dateStr);
+  const originalShift = shiftTypes.find(s => s.id === originalId);
+  const originalLabel = originalId === '' ? 'a rest day' : (originalShift ? originalShift.name : 'its original shift');
+  if(!confirm('Revert this day back to ' + originalLabel + '? This removes the change you made.')) return;
+  const { error } = await sb.from('overrides').delete().eq('user_id', currentUser.id).eq('override_date', dateStr);
+  if(error){ alert('Could not revert: ' + error.message); return; }
+  const { data } = await sb.from('overrides').select('*').eq('user_id', currentUser.id).order('override_date');
+  allOverrides = data || [];
+  holidays = allOverrides.filter(o => o.value === '__holiday__');
+  closeDayDetail();
+  renderHolidayList();
+  renderCalendarTab();
 }
 
 function closeDayDetail(){
