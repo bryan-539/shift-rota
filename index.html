@@ -1212,14 +1212,13 @@ function parseDutyPdfText(text){
     if(!group || group.stops.length === 0){ group = null; return; }
     const first = group.stops[0];
     const last = group.stops[group.stops.length - 1];
-    const mid = group.stops.slice(1, -1);
     legs.push({
       start: pdfMilToHHMM(first.time),
       end: pdfMilToHHMM(last.time),
       route: group.route,
       from: pdfCleanStopName(first.name),
       to: pdfCleanStopName(last.name),
-      extra: mid.map(s => pdfCleanStopName(s.name) + ' ' + pdfMilToHHMM(s.time)).join(', ')
+      extra: ''
     });
     group = null;
   };
@@ -1228,11 +1227,11 @@ function parseDutyPdfText(text){
     const line = rawLines[i];
 
     const svcM = line.match(/^Service\s+(\S+)/i);
-    if(svcM){ flushGroup(); group = { route: 'Service ' + svcM[1], stops: [] }; continue; }
-    if(/^Light$/i.test(line)){ flushGroup(); group = { route: 'Light run', stops: [] }; continue; }
+    if(svcM){ flushGroup(); group = { route: svcM[1], stops: [] }; continue; }
+    if(/^Light$/i.test(line)){ flushGroup(); group = { route: 'Light', stops: [] }; continue; }
 
     const jnyM = line.match(/^Journey No\.\s*(\S+)/i);
-    if(jnyM && group){ group.route += ' · Jny ' + jnyM[1]; continue; }
+    if(jnyM && group){ continue; }
 
     const breakM = line.match(/^Break\/As Req\s+(\d{3,4})\s*-\s*(\d{3,4})/i);
     if(breakM){
