@@ -60,6 +60,14 @@
   .leg-summary .gap-line{color:var(--amber);}
   .leg-summary .pass-line{color:var(--teal);}
   .leg-summary .warn-line{color:var(--danger);}
+  .cmp-date{font-weight:600;color:var(--text);font-size:12px;margin-bottom:6px;}
+  .cmp-cols{display:flex;gap:8px;}
+  .cmp-cell{flex:1 1 0;min-width:0;background:rgba(0,0,0,0.14);border-radius:6px;padding:6px 8px;}
+  .cmp-who{display:block;font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-dim);margin-bottom:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .cmp-shift{display:flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:var(--text);}
+  .cmp-shift .cmp-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .cmp-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0;}
+  .cmp-time{font-weight:400;color:var(--text-dim);font-size:11px;}
   .swap-pick-list{display:flex;flex-direction:column;gap:6px;max-height:220px;overflow-y:auto;}
   .swap-pick-item{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:7px;border:1px solid var(--border);background:var(--surface-alt);cursor:pointer;font-size:13px;font-weight:600;transition:border-color .15s;}
   .swap-pick-item:hover{border-color:var(--amber);}
@@ -788,37 +796,40 @@ function renderFriendCalendar(){
     row.className = 'off-item';
     row.style.cursor = 'pointer';
     const dateLabel = cursor.toLocaleDateString(undefined, {weekday:'short', day:'numeric', month:'short'});
-    let label = dateLabel + ' — ';
 
     if(compare){
       const myShiftId = computeEffectiveShift(myRota, allOverrides, key);
       const myShift = shiftTypes.find(s => s.id === myShiftId);
       const myWorking = !!myShiftId && myShiftId !== '__holiday__';
       if(myWorking && friendWorking){
-        label += 'Both working — You' + shiftTimeLabel(myShift) + ', them' + shiftTimeLabel(friendShift);
         row.style.background = 'rgba(226,87,76,0.18)';
         row.style.borderColor = 'var(--danger)';
       } else if(!myWorking && !friendWorking){
-        label += 'Both off';
         row.style.background = 'rgba(67,198,172,0.18)';
         row.style.borderColor = 'var(--teal)';
       } else if(myWorking && !friendWorking){
-        label += 'You working' + shiftTimeLabel(myShift) + ', they\'re off';
         row.style.background = 'rgba(224,143,79,0.18)';
         row.style.borderColor = '#E08F4F';
       } else {
-        label += 'They\'re working' + shiftTimeLabel(friendShift) + ', you\'re off';
         row.style.background = 'rgba(242,169,59,0.18)';
         row.style.borderColor = 'var(--amber)';
       }
+      row.style.display = 'block';
+      row.innerHTML =
+        '<div class="cmp-date">' + escapeHtml(dateLabel) + '</div>' +
+        '<div class="cmp-cols">' +
+          compareShiftCell('You', myShiftId, myShift) +
+          compareShiftCell(friendLabel(selectedFriend), friendShiftId, friendShift) +
+        '</div>';
+      row.onclick = ()=>showCompareDayDetail(key, myShift, myShiftId, friendShift, friendShiftId);
     } else {
+      let label = dateLabel + ' — ';
       if(friendShiftId === '__holiday__') label += 'Holiday';
       else if(friendShift) label += friendShift.name + shiftTimeLabel(friendShift);
       else label += '—';
+      row.innerHTML = '<span>' + label + '</span>';
+      row.onclick = ()=>showFriendDayDetail(key, friendShift, friendShiftId);
     }
-
-    row.innerHTML = '<span>' + label + '</span>';
-    row.onclick = ()=>showFriendDayDetail(key, friendShift, friendShiftId);
     listEl.appendChild(row);
     cursor.setDate(cursor.getDate()+1);
   }
@@ -856,10 +867,40 @@ function closeDayDetail(){
   document.getElementById('day-detail-panel').style.display = 'none';
 }
 
+function compareShiftCell(who, shiftId, shift){
+  let inner;
+  if(shiftId === '__holiday__'){
+    inner = '<span class="cmp-dot" style="background:var(--text-dim);"></span><span class="cmp-name">Holiday</span>';
+  } else if(shift){
+    const time = (!shift.all_day && shift.start_time)
+      ? ' <span class="cmp-time">' + escapeHtml(shift.start_time + '–' + shift.end_time) + '</span>'
+      : '';
+    inner = '<span class="cmp-dot" style="background:' + escapeHtml(shift.color || '#F2A93B') + ';"></span>'
+      + '<span class="cmp-name">' + escapeHtml(shift.name) + time + '</span>';
+  } else {
+    inner = '<span class="cmp-dot" style="background:transparent;border:1px solid var(--border);"></span>'
+      + '<span class="cmp-name" style="color:var(--text-dim);font-weight:400;">Off</span>';
+  }
+  return '<div class="cmp-cell"><span class="cmp-who">' + escapeHtml(who) + '</span>'
+    + '<div class="cmp-shift">' + inner + '</div></div>';
+}
+
 function showFriendDayDetail(dateStr, shift, shiftId){
   const panel = document.getElementById('friend-day-detail-panel');
   if(!panel) return;
   panel.innerHTML = buildDayDetailHTML(dateStr, shift, shiftId, friendLabel(selectedFriend) + "'s — ") +
+    '<button class="btn secondary full" style="margin-top:10px;" onclick="closeFriendDayDetail()">Close</button>';
+  panel.style.display = 'block';
+  panel.scrollIntoView({behavior:'smooth', block:'center'});
+}
+
+function showCompareDayDetail(dateStr, myShift, myShiftId, friendShift, friendShiftId){
+  const panel = document.getElementById('friend-day-detail-panel');
+  if(!panel) return;
+  panel.innerHTML =
+    buildDayDetailHTML(dateStr, myShift, myShiftId, 'You — ') +
+    '<hr style="border:none;border-top:1px solid var(--border);margin:12px 0;">' +
+    buildDayDetailHTML(dateStr, friendShift, friendShiftId, friendLabel(selectedFriend) + "'s — ") +
     '<button class="btn secondary full" style="margin-top:10px;" onclick="closeFriendDayDetail()">Close</button>';
   panel.style.display = 'block';
   panel.scrollIntoView({behavior:'smooth', block:'center'});
