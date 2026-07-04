@@ -3350,10 +3350,25 @@ async function loadAdminUserRota(userId, container, btn){
     weeks: w,
     weekStartDay: (r && r.week_start_day != null) ? r.week_start_day : 0,
     rotaStart: (r && r.rota_start) || '',
+    anchorDate: (r && r.rota_start) || '', // stored rota_start is Week 1 by definition
+    anchorWeek: 1,
     pattern: resizePatternArray((r && r.original_pattern) || [], w),
     shiftTypes: stRes.data || []
   };
   renderAdminRotaGrid(container);
+}
+
+// Derive the edited user's canonical Day-1/Week-1 date from the anchor
+// (a known date + which week of the pattern it falls in).
+function adminRecomputeRotaStart(){
+  const ar = adminEditRota;
+  if(!ar.anchorDate){ ar.rotaStart = ''; return; }
+  const d = new Date(ar.anchorDate + 'T00:00:00');
+  const dowCol = (((d.getDay() - ar.weekStartDay) % 7) + 7) % 7;
+  const anchorIndex = ((ar.anchorWeek || 1) - 1) * 7 + dowCol;
+  const start = new Date(d);
+  start.setDate(start.getDate() - anchorIndex);
+  ar.rotaStart = dateKeyLocal(start);
 }
 
 function renderAdminRotaGrid(container){
@@ -3373,26 +3388,40 @@ function renderAdminRotaGrid(container){
 
   function mkWrap(label, maxW){ const d=document.createElement('div'); if(maxW)d.style.maxWidth=maxW; const l=document.createElement('label'); l.textContent=label; d.appendChild(l); return d; }
 
-  const startWrap = mkWrap('Start date', '160px');
-  const startInput = document.createElement('input');
-  startInput.type='date'; startInput.value=ar.rotaStart;
-  startInput.oninput=()=>{ ar.rotaStart=startInput.value; };
-  startWrap.appendChild(startInput);
-
   const weeksWrap = mkWrap('Weeks', '110px');
   const weeksSel = document.createElement('select');
-  for(let i=1;i<=8;i++){ const o=document.createElement('option'); o.value=i; o.textContent=i+' week'+(i>1?'s':''); if(i===ar.weeks)o.selected=true; weeksSel.appendChild(o); }
-  weeksSel.onchange=()=>{ const nw=parseInt(weeksSel.value,10); ar.pattern=resizePatternArray(ar.pattern,nw); ar.weeks=nw; renderAdminRotaGrid(container); };
+  for(let i=1;i<=26;i++){ const o=document.createElement('option'); o.value=i; o.textContent=i+' week'+(i>1?'s':''); if(i===ar.weeks)o.selected=true; weeksSel.appendChild(o); }
+  weeksSel.onchange=()=>{ const nw=parseInt(weeksSel.value,10); ar.pattern=resizePatternArray(ar.pattern,nw); ar.weeks=nw; if(ar.anchorWeek>nw) ar.anchorWeek=nw; adminRecomputeRotaStart(); renderAdminRotaGrid(container); };
   weeksWrap.appendChild(weeksSel);
 
   const wsdWrap = mkWrap('Week starts', '140px');
   const wsdSel = document.createElement('select');
   ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'].forEach((day,i)=>{ const o=document.createElement('option'); o.value=i; o.textContent=day; if(i===ar.weekStartDay)o.selected=true; wsdSel.appendChild(o); });
-  wsdSel.onchange=()=>{ ar.weekStartDay=parseInt(wsdSel.value,10); renderAdminRotaGrid(container); };
+  wsdSel.onchange=()=>{ ar.weekStartDay=parseInt(wsdSel.value,10); adminRecomputeRotaStart(); renderAdminRotaGrid(container); };
   wsdWrap.appendChild(wsdSel);
 
-  ctrl.appendChild(startWrap); ctrl.appendChild(weeksWrap); ctrl.appendChild(wsdWrap);
+  ctrl.appendChild(weeksWrap); ctrl.appendChild(wsdWrap);
   container.appendChild(ctrl);
+
+  // Anchor to the calendar — a known date + which week of the pattern it's in
+  const anchorRow = document.createElement('div');
+  anchorRow.className = 'row';
+  const adHeading = document.createElement('p');
+  adHeading.className = 'help'; adHeading.style.cssText = 'margin:4px 0 2px;width:100%;';
+  adHeading.textContent = 'Anchor to the calendar: pick a date you know this user works and which week of the pattern it falls in.';
+  const adWrap = mkWrap('A date on their rota', '200px');
+  const adInput = document.createElement('input');
+  adInput.type='date'; adInput.value=ar.anchorDate || '';
+  adInput.oninput=()=>{ ar.anchorDate=adInput.value; adminRecomputeRotaStart(); };
+  adWrap.appendChild(adInput);
+  const awWrap = mkWrap('That date is in…', '160px');
+  const awSel = document.createElement('select');
+  ar.anchorWeek = Math.min(ar.anchorWeek || 1, ar.weeks);
+  for(let i=1;i<=ar.weeks;i++){ const o=document.createElement('option'); o.value=i; o.textContent='Week '+i; if(i===ar.anchorWeek)o.selected=true; awSel.appendChild(o); }
+  awSel.onchange=()=>{ ar.anchorWeek=parseInt(awSel.value,10); adminRecomputeRotaStart(); };
+  awWrap.appendChild(awSel);
+  anchorRow.appendChild(adHeading); anchorRow.appendChild(adWrap); anchorRow.appendChild(awWrap);
+  container.appendChild(anchorRow);
 
   // Apply a rota template to this user
   if(rotaTemplates.length > 0){
@@ -3413,6 +3442,40 @@ function renderAdminRotaGrid(container){
     tplWrap.appendChild(selWrap); tplWrap.appendChild(applyBtn);
     container.appendChild(tplWrap);
   }
+
+  // Quick-add a shift for this user
+  const qWrap = document.createElement('div');
+  qWrap.style.cssText = 'margin-bottom:10px;padding:8px 10px;border:1px solid var(--border);border-radius:7px;';
+  const qHead = document.createElement('label');
+  qHead.style.cssText = 'font-weight:600;color:var(--text);'; qHead.textContent = 'Quick-add a shift for this user';
+  qWrap.appendChild(qHead);
+  const qRow = document.createElement('div'); qRow.className='row'; qRow.style.marginTop='6px';
+  const qnWrap = mkWrap('Name',''); qnWrap.style.flex='1'; qnWrap.style.minWidth='120px';
+  const qnInput = document.createElement('input'); qnInput.type='text'; qnInput.placeholder='e.g. Late'; qnWrap.appendChild(qnInput);
+  const qsWrap = mkWrap('Start','110px'); const qsInput = document.createElement('input'); qsInput.type='time'; qsWrap.appendChild(qsInput);
+  const qeWrap = mkWrap('Finish','110px'); const qeInput = document.createElement('input'); qeInput.type='time'; qeWrap.appendChild(qeInput);
+  qRow.appendChild(qnWrap); qRow.appendChild(qsWrap); qRow.appendChild(qeWrap);
+  qWrap.appendChild(qRow);
+  const qStatus = document.createElement('div'); qStatus.className='status';
+  const qBtn = document.createElement('button'); qBtn.className='btn secondary'; qBtn.type='button'; qBtn.textContent='Add shift';
+  qBtn.onclick = async ()=>{
+    const name = qnInput.value.trim();
+    if(!name){ qStatus.style.color='var(--danger)'; qStatus.textContent='Enter a name.'; return; }
+    qBtn.disabled=true; qStatus.style.color='var(--text-dim)'; qStatus.textContent='Adding…';
+    const hasTimes = !!(qsInput.value && qeInput.value);
+    const { data, error } = await sb.from('shift_types').insert({
+      owner_id: ar.userId, is_template:false, name,
+      all_day:!hasTimes, start_time:hasTimes?qsInput.value:'', end_time:hasTimes?qeInput.value:'',
+      paid_hours:'', description:'', color: IMPORT_PALETTE[ar.shiftTypes.length % IMPORT_PALETTE.length],
+      legs_data:null, allowed_days:null
+    }).select().single();
+    qBtn.disabled=false;
+    if(error){ qStatus.style.color='var(--danger)'; qStatus.textContent=error.message; return; }
+    ar.shiftTypes.push(data);
+    renderAdminRotaGrid(container); // re-render so it's selectable in the grid
+  };
+  qWrap.appendChild(qBtn); qWrap.appendChild(qStatus);
+  container.appendChild(qWrap);
 
   // Pattern grid
   const grid = document.createElement('div');
