@@ -105,6 +105,8 @@
   .off-item button{background:none;border:none;color:var(--danger);cursor:pointer;font-size:13px;font-weight:600;}
   .day-cell-readonly{padding:8px 4px;font-size:11px;text-align:center;border-radius:6px;font-weight:600;background:var(--surface-alt);color:var(--text-dim);}
   .day-cell-readonly .pay-line{display:block;font-weight:400;font-size:10px;margin-top:2px;opacity:.85;}
+  .cal-shift-name{font-weight:700;font-size:16px;}
+  .day-cell-readonly .cal-grid-name{display:block;font-weight:700;font-size:12px;margin-top:1px;opacity:1;}
   .income-row{display:flex;justify-content:space-between;align-items:center;padding:6px 0;font-size:13px;color:var(--text-dim);}
   .income-row strong{color:var(--text);font-weight:600;}
   .income-row.total{border-top:1px solid var(--border);margin-top:4px;padding-top:10px;color:var(--text);}
@@ -514,14 +516,23 @@
             </select>
           </div>
         </div>
-        <p class="help" style="margin-top:0;margin-bottom:12px;">Day 1 of Week 1 lines up with the date you set below. Pick a shift for each day — leave as "—" for a rest day.</p>
+        <p class="help" style="margin-top:0;margin-bottom:12px;">Pick a shift for each day — leave as "—" for a rest day. You'll line this pattern up with a real date in step 3.</p>
         <div id="pattern-grid"></div>
       </section>
 
       <section>
-        <p class="sec-title">3 · Rota start date</p>
-        <p class="help" style="margin-top:0;">The real calendar date that lines up with Day 1, Week 1 above.</p>
-        <input type="date" id="rota-start">
+        <p class="sec-title">3 · Anchor your rota to the calendar</p>
+        <p class="help" style="margin-top:0;">Pick any date you already know a shift for, then say which week of the pattern above that date falls in. Everything else is worked out from there — you don't have to start from Week 1, Day 1.</p>
+        <div class="row">
+          <div style="max-width:200px;">
+            <label>A date on your rota</label>
+            <input type="date" id="rota-start" onchange="onAnchorChange()">
+          </div>
+          <div style="max-width:180px;">
+            <label>That date is in…</label>
+            <select id="rota-anchor-week" onchange="onAnchorChange()"></select>
+          </div>
+        </div>
         <div class="row" style="margin-top:12px;">
           <div style="max-width:200px;">
             <label>Week starts on</label>
@@ -1347,6 +1358,8 @@ async function loadAccountData(){
   document.getElementById('rota-start').value = rotaStart;
   document.getElementById('weeks-select').value = String(weeks);
   document.getElementById('week-start-day').value = String(weekStartDay);
+  populateAnchorWeekSelect();
+  document.getElementById('rota-anchor-week').value = '1'; // stored rota_start is Week 1 by definition
 
   // Auto-sync unmodified user copies with any template changes (runs client-side on load)
   await syncTemplateCopies();
@@ -1741,6 +1754,7 @@ function resizePatternArray(arr, newWeeks){
 
 function changeWeekStartDay(){
   weekStartDay = parseInt(document.getElementById('week-start-day').value, 10);
+  recomputeRotaStartFromAnchor();
   renderGrid();
   renderOriginalGrid();
   renderCalendarTab();
@@ -1758,6 +1772,8 @@ function changeWeeks(){
   }
   pattern = resizePatternArray(pattern, newWeeks);
   weeks = newWeeks;
+  populateAnchorWeekSelect();
+  recomputeRotaStartFromAnchor();
   renderGrid();
 }
 
@@ -2153,10 +2169,10 @@ function renderCalendarTab(){
       let label = dateLabel;
       let swatch = '';
       if(isHoliday){
-        label += ' — Holiday';
+        label += ' — <span class="cal-shift-name">Holiday</span>';
       } else if(shift){
         swatch = '<span style="display:inline-block;width:10px;height:10px;border-radius:3px;background:' + (shift.color||'#F2A93B') + ';margin-right:6px;"></span>';
-        label += ' — ' + shift.name + shiftTimeLabel(shift);
+        label += ' — <span class="cal-shift-name">' + escapeHtml(shift.name) + '</span>' + escapeHtml(shiftTimeLabel(shift));
         if(payRates.enabled) label += ' (£' + dayPay.toFixed(2) + ')';
       } else {
         label += ' — —';
@@ -2201,7 +2217,7 @@ function renderCalendarTab(){
       } else if(shift){
         cell.style.background = shift.color || '#F2A93B';
         cell.style.color = '#1B1E26';
-        inner += '<span class="pay-line">' + escapeHtml(shift.name) + escapeHtml(shiftTimeLabel(shift)) + (payRates.enabled ? ' £'+dayPay.toFixed(2) : '') + '</span>';
+        inner += '<span class="cal-grid-name">' + escapeHtml(shift.name) + '</span><span class="pay-line">' + escapeHtml(shiftTimeLabel(shift)) + (payRates.enabled ? ' £'+dayPay.toFixed(2) : '') + '</span>';
       } else {
         inner += '<span class="pay-line">—</span>';
       }
@@ -2328,9 +2344,38 @@ function styleSelect(sel){
   }
 }
 
-document.getElementById('rota-start').addEventListener('change', (e)=>{
-  rotaStart = e.target.value;
-});
+// The date field is an "anchor": the real date of any known day, plus which week
+// of the pattern it falls in. rotaStart (the canonical Day-1/Week-1 date) is
+// derived from it — the day-of-week column is inferred from the date itself.
+function recomputeRotaStartFromAnchor(){
+  const anchorDate = document.getElementById('rota-start').value;
+  if(!anchorDate){ rotaStart = ''; return; }
+  const weekNum = parseInt(document.getElementById('rota-anchor-week').value, 10) || 1;
+  const d = new Date(anchorDate + 'T00:00:00');
+  const dowCol = (((d.getDay() - weekStartDay) % 7) + 7) % 7;
+  const anchorIndex = (weekNum - 1) * 7 + dowCol;
+  const start = new Date(d);
+  start.setDate(start.getDate() - anchorIndex);
+  rotaStart = dateKeyLocal(start);
+}
+
+function populateAnchorWeekSelect(){
+  const sel = document.getElementById('rota-anchor-week');
+  if(!sel) return;
+  const prev = parseInt(sel.value, 10) || 1;
+  sel.innerHTML = '';
+  for(let i=1;i<=weeks;i++){
+    const o=document.createElement('option'); o.value=i; o.textContent='Week '+i; sel.appendChild(o);
+  }
+  sel.value = String(Math.min(prev, weeks));
+}
+
+function onAnchorChange(){
+  recomputeRotaStartFromAnchor();
+  renderGrid();
+  renderOriginalGrid();
+  renderCalendarTab();
+}
 
 async function saveOriginalRota(){
   const statusEl = document.getElementById('save-status');
@@ -2551,10 +2596,11 @@ async function applyRotaTemplate(rtpl){
     }
   }
 
+  if(!rotaStart) rotaStart = new Date().toISOString().slice(0,10);
   const newPattern = resizePatternArray(tplPattern.map(id => idMap[id] || ''), newWeeks);
   const { error } = await sb.from('rota_settings').upsert({
     user_id: currentUser.id,
-    rota_start: rotaStart || new Date().toISOString().slice(0,10),
+    rota_start: rotaStart,
     weeks: newWeeks, week_start_day: wsd, original_pattern: newPattern,
     updated_at: new Date().toISOString()
   });
@@ -2563,6 +2609,9 @@ async function applyRotaTemplate(rtpl){
   weeks = newWeeks; weekStartDay = wsd; pattern = newPattern;
   document.getElementById('weeks-select').value = String(weeks);
   document.getElementById('week-start-day').value = String(weekStartDay);
+  document.getElementById('rota-start').value = rotaStart;
+  populateAnchorWeekSelect();
+  document.getElementById('rota-anchor-week').value = '1';
   renderShiftTypeList(); renderGrid(); renderOriginalGrid(); renderCalendarTab();
   switchTab('account');
 }
