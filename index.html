@@ -198,6 +198,17 @@
         </div>
         <div id="swap-shift-picker" style="margin-bottom:10px;"></div>
         <input type="hidden" id="swap-to-shift" value="">
+        <button type="button" class="btn secondary" style="margin-bottom:10px;font-size:12px;padding:6px 10px;" onclick="toggleSwapCreate()">＋ Create a new shift</button>
+        <div id="swap-create-box" style="display:none;margin-bottom:10px;padding:10px;border:1px solid var(--border);border-radius:7px;background:var(--surface-alt);">
+          <div class="row"><div><label>Name</label><input type="text" id="swap-new-name" placeholder="e.g. Spare"></div></div>
+          <div class="row">
+            <div><label>Start</label><input type="time" id="swap-new-start"></div>
+            <div><label>Finish</label><input type="time" id="swap-new-end"></div>
+          </div>
+          <p class="help" style="margin-top:0;">Leave the times blank for an all-day / flexible shift.</p>
+          <button class="btn secondary full" type="button" onclick="createSwapShift()">Create &amp; select</button>
+          <div class="status" id="swap-new-status"></div>
+        </div>
         <button class="btn secondary full" onclick="initiateSelfSwap()">Apply change</button>
         <div id="swap-confirm-box" style="display:none;margin-top:12px;">
           <p class="help" style="margin-top:0;font-weight:600;color:var(--text);">Do you need to inform your workplace of this change?</p>
@@ -554,6 +565,17 @@ REST, IB15 1215-2058, IB15 1215-2058, IB18 1530-0138, IB16 1315-2138, IB16 1315-
         </div>
         <p class="help" style="margin-top:0;margin-bottom:12px;">Pick a shift for each day — leave as "—" for a rest day. You'll line this pattern up with a real date in step 3.</p>
         <div id="pattern-grid"></div>
+        <div style="margin-top:14px;padding:10px;border:1px solid var(--border);border-radius:7px;">
+          <label style="font-weight:600;color:var(--text);">Quick-add a shift</label>
+          <p class="help" style="margin-top:2px;">Create a shift on the fly with a custom name and times — it appears straight away in the grid above.</p>
+          <div class="row">
+            <div><label>Name</label><input type="text" id="quick-name" placeholder="e.g. Late"></div>
+            <div style="max-width:120px;"><label>Start</label><input type="time" id="quick-start"></div>
+            <div style="max-width:120px;"><label>Finish</label><input type="time" id="quick-end"></div>
+          </div>
+          <button class="btn secondary full" type="button" onclick="quickAddShiftToRota()">Add shift</button>
+          <div class="status" id="quick-status"></div>
+        </div>
       </section>
 
       <section>
@@ -1964,6 +1986,63 @@ function togglePaySection(){
   document.getElementById('pay-rates-box').style.display = on ? 'block' : 'none';
   payRates.enabled = on;
   renderOriginalGrid();
+}
+
+// Create a personal shift type on the fly (used by the rota builder and the
+// change-a-day picker). Returns { data } or { error }.
+async function quickCreateShift(name, start, end){
+  const hasTimes = !!(start && end);
+  const color = IMPORT_PALETTE[shiftTypes.length % IMPORT_PALETTE.length];
+  const { data, error } = await sb.from('shift_types').insert({
+    owner_id: currentUser.id, is_template: false, name,
+    all_day: !hasTimes, start_time: hasTimes ? start : '', end_time: hasTimes ? end : '',
+    paid_hours: '', description: '', color, legs_data: null, allowed_days: null
+  }).select().single();
+  if(error) return { error };
+  shiftTypes.push(data);
+  rememberColor(color);
+  return { data };
+}
+
+async function quickAddShiftToRota(){
+  const name = document.getElementById('quick-name').value.trim();
+  const start = document.getElementById('quick-start').value;
+  const end = document.getElementById('quick-end').value;
+  const statusEl = document.getElementById('quick-status');
+  if(!name){ statusEl.style.color='var(--danger)'; statusEl.textContent='Enter a name.'; return; }
+  statusEl.style.color='var(--text-dim)'; statusEl.textContent='Adding…';
+  const { data, error } = await quickCreateShift(name, start, end);
+  if(error){ statusEl.style.color='var(--danger)'; statusEl.textContent=error.message; return; }
+  renderShiftTypeList(); renderGrid(); populateSwapToSelect();
+  document.getElementById('quick-name').value='';
+  document.getElementById('quick-start').value='';
+  document.getElementById('quick-end').value='';
+  statusEl.style.color='var(--teal)'; statusEl.textContent='Added "'+data.name+'" — now selectable in the grid above.';
+}
+
+function toggleSwapCreate(){
+  const box = document.getElementById('swap-create-box');
+  box.style.display = box.style.display === 'none' ? 'block' : 'none';
+}
+
+async function createSwapShift(){
+  const name = document.getElementById('swap-new-name').value.trim();
+  const start = document.getElementById('swap-new-start').value;
+  const end = document.getElementById('swap-new-end').value;
+  const statusEl = document.getElementById('swap-new-status');
+  if(!name){ statusEl.style.color='var(--danger)'; statusEl.textContent='Enter a name.'; return; }
+  statusEl.style.color='var(--text-dim)'; statusEl.textContent='Creating…';
+  const { data, error } = await quickCreateShift(name, start, end);
+  if(error){ statusEl.style.color='var(--danger)'; statusEl.textContent=error.message; return; }
+  renderShiftTypeList(); renderGrid();
+  document.getElementById('swap-to-shift').value = data.id; // select it for the change
+  document.getElementById('swap-shift-search').value = '';
+  renderSwapShiftPicker();
+  document.getElementById('swap-new-name').value='';
+  document.getElementById('swap-new-start').value='';
+  document.getElementById('swap-new-end').value='';
+  document.getElementById('swap-create-box').style.display='none';
+  statusEl.textContent='';
 }
 
 function bindPayInputs(){
