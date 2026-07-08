@@ -55,6 +55,10 @@ create policy "Admins can manage any rota_settings" on public.rota_settings
   for all using (user_id = auth.uid() or public.is_admin())
   with check (user_id = auth.uid() or public.is_admin());
 
+-- Scheduled future rota versions (each { effective_from, rota_start, weeks,
+-- week_start_day, pattern }). Only needed for the "scheduled rota changes" feature.
+alter table public.rota_settings add column if not exists schedule jsonb;
+
 drop policy if exists "Anyone can view overrides" on public.overrides;
 create policy "Anyone can view overrides" on public.overrides
   for select to authenticated using (true);
