@@ -550,6 +550,27 @@ REST, IB15 1215-2058, IB15 1215-2058, IB18 1530-0138, IB16 1315-2138, IB16 1315-
         <div id="template-shift-type-list" style="margin-top:14px;"></div>
       </section>
 
+      <section id="rota-version-section">
+        <p class="sec-title">Scheduled rota changes</p>
+        <p class="help" style="margin-top:0;">Set up a new rota that starts on a future date. Days before it keep your current rota (and any swaps); your booked holidays stay correct throughout. Steps 2–4 below edit whichever rota you pick here.</p>
+        <div class="row">
+          <div style="max-width:260px;">
+            <label>Editing</label>
+            <select id="rota-version-select" onchange="onRotaVersionChange()">
+              <option value="__base__">Current rota</option>
+            </select>
+          </div>
+          <div style="display:flex;align-items:flex-end;">
+            <button class="btn secondary" id="rota-version-delete" style="display:none;white-space:nowrap;" onclick="deleteSelectedRotaVersion()">Delete this change</button>
+          </div>
+        </div>
+        <div class="row">
+          <div style="max-width:200px;"><label>New change starts on</label><input type="date" id="rota-version-new-date"></div>
+          <div style="display:flex;align-items:flex-end;"><button class="btn secondary" onclick="addScheduledRotaChange()" style="white-space:nowrap;">Set up a rota from this date</button></div>
+        </div>
+        <div class="help" id="rota-version-note" style="color:var(--amber);"></div>
+      </section>
+
       <section>
         <p class="sec-title">2 · Your rota pattern</p>
         <div class="row">
@@ -647,7 +668,7 @@ REST, IB15 1215-2058, IB15 1215-2058, IB18 1530-0138, IB16 1315-2138, IB16 1315-
         </div>
       </section>
 
-      <button class="btn full" onclick="saveOriginalRota()">Save my original rota</button>
+      <button class="btn full" id="save-rota-btn" onclick="saveOriginalRota()">Save my original rota</button>
       <div class="status" id="save-status"></div>
     </div>
 
@@ -691,6 +712,12 @@ let rotaTemplates = [];  // admin rota templates (is_template = true, category =
 let pattern = Array(35).fill('');
 let weeks = 5;
 let rotaStart = '';
+// Scheduled future rota versions: [{ effective_from, rota_start, weeks, week_start_day, pattern }]
+let rotaSchedule = [];
+// When editing a scheduled version, this holds its effective_from date; null = editing the current (base) rota.
+let editingRotaVersion = null;
+// Snapshot of the current (base) rota, authoritative while a scheduled version is loaded in the editor.
+let baseRota = { rota_start:'', weeks:5, week_start_day:0, pattern: Array(35).fill('') };
 let holidays = []; // override rows where value === '__holiday__'
 let payRates = { enabled:false, sun:0, mon:0, tue:0, wed:0, thu:0, fri:0, sat:0 };
 let isAdmin = false;
@@ -847,13 +874,7 @@ function computeEffectiveShift(rotaObj, overridesArr, dateStr){
   const ov = overridesArr.find(o => o.override_date === dateStr);
   if(ov) return ov.value;
   if(!rotaObj || !rotaObj.rota_start) return '';
-  const start = new Date(rotaObj.rota_start + 'T00:00:00');
-  const d = new Date(dateStr + 'T00:00:00');
-  const diffDays = Math.floor((d - start) / 86400000);
-  const len = (rotaObj.weeks || 5) * 7;
-  let idx = diffDays % len;
-  if(idx < 0) idx += len;
-  return (rotaObj.original_pattern || [])[idx] || '';
+  return shiftFromRotaVersions(rotaObj.rota_start, rotaObj.weeks || 5, rotaObj.original_pattern || [], rotaObj.schedule, dateStr);
 }
 
 function shiftTimeLabel(shift){
@@ -1697,6 +1718,8 @@ async function loadAccountData(){
     document.getElementById('pay-' + k).value = payRates[k] || '';
   });
   togglePaySection();
+  editingRotaVersion = null;
+  rotaSchedule = Array.isArray(rotaRes.data && rotaRes.data.schedule) ? rotaRes.data.schedule : [];
   if(rotaRes.data){
     rotaStart = rotaRes.data.rota_start || '';
     weeks = rotaRes.data.weeks || 5;
@@ -1711,11 +1734,13 @@ async function loadAccountData(){
     weekStartDay = 0;
     pattern = Array(35).fill('');
   }
+  baseRota = { rota_start: rotaStart, weeks: weeks, week_start_day: weekStartDay, pattern: [...pattern] };
   document.getElementById('rota-start').value = rotaStart;
   document.getElementById('weeks-select').value = String(weeks);
   document.getElementById('week-start-day').value = String(weekStartDay);
   populateAnchorWeekSelect();
   document.getElementById('rota-anchor-week').value = '1'; // stored rota_start is Week 1 by definition
+  renderRotaVersionSelect();
 
   // Auto-sync unmodified user copies with any template changes (runs client-side on load)
   await syncTemplateCopies();
@@ -2619,15 +2644,46 @@ function dateKeyLocal(d){
   return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
 }
 
-function patternShiftForDate(dateStr){
-  if(!rotaStart) return '';
-  const start = new Date(rotaStart + 'T00:00:00');
+// Pick the rota version in effect on a date: the latest scheduled change whose
+// effective_from is on or before the date, else the base rota.
+function resolveRotaForDate(baseStart, baseWeeks, basePattern, schedule, dateStr){
+  let v = { rota_start: baseStart, weeks: baseWeeks, pattern: basePattern };
+  if(Array.isArray(schedule)){
+    let best = null;
+    for(const s of schedule){
+      if(s && s.effective_from && s.effective_from <= dateStr && s.rota_start){
+        if(!best || s.effective_from > best.effective_from) best = s;
+      }
+    }
+    if(best) v = { rota_start: best.rota_start, weeks: best.weeks, pattern: best.pattern };
+  }
+  return v;
+}
+
+function shiftFromRotaVersions(baseStart, baseWeeks, basePattern, schedule, dateStr){
+  const v = resolveRotaForDate(baseStart, baseWeeks, basePattern, schedule, dateStr);
+  if(!v.rota_start) return '';
+  const start = new Date(v.rota_start + 'T00:00:00');
   const d = new Date(dateStr + 'T00:00:00');
   const diffDays = Math.floor((d - start) / 86400000);
-  const len = weeks * 7;
+  const len = (v.weeks || 1) * 7;
   let idx = diffDays % len;
   if(idx < 0) idx += len;
-  return pattern[idx] || '';
+  return (v.pattern || [])[idx] || '';
+}
+
+// The base rota to compute the calendar from: while editing the base, the live
+// grid globals are authoritative (so the preview updates as you edit); while a
+// scheduled version is loaded, use the saved base snapshot.
+function calendarBaseRota(){
+  return editingRotaVersion === null
+    ? { rota_start: rotaStart, weeks: weeks, pattern: pattern }
+    : { rota_start: baseRota.rota_start, weeks: baseRota.weeks, pattern: baseRota.pattern };
+}
+
+function patternShiftForDate(dateStr){
+  const b = calendarBaseRota();
+  return shiftFromRotaVersions(b.rota_start, b.weeks, b.pattern, rotaSchedule, dateStr);
 }
 
 function effectiveShift(dateStr){
@@ -2954,27 +3010,115 @@ function onAnchorChange(){
   renderCalendarTab();
 }
 
-async function saveOriginalRota(){
-  const statusEl = document.getElementById('save-status');
-  if(!rotaStart){
-    statusEl.style.color = 'var(--danger)';
-    statusEl.textContent = 'Set a rota start date first.';
-    return;
+// ---------- Scheduled rota versions ----------
+function snapshotEditorRota(){
+  return { rota_start: rotaStart, weeks: weeks, week_start_day: weekStartDay, pattern: [...pattern] };
+}
+
+function loadRotaIntoEditor(v){
+  rotaStart = v.rota_start || '';
+  weeks = v.weeks || 5;
+  weekStartDay = (v.week_start_day != null) ? v.week_start_day : 0;
+  pattern = resizePatternArray((v.pattern || []).slice(), weeks);
+  document.getElementById('rota-start').value = rotaStart;
+  document.getElementById('weeks-select').value = String(weeks);
+  document.getElementById('week-start-day').value = String(weekStartDay);
+  populateAnchorWeekSelect();
+  document.getElementById('rota-anchor-week').value = '1';
+  renderShiftTypeList();
+  renderGrid();
+  renderOriginalGrid();
+  renderCalendarTab();
+}
+
+function renderRotaVersionSelect(){
+  const sel = document.getElementById('rota-version-select');
+  if(!sel) return;
+  const sorted = [...rotaSchedule].filter(s => s && s.effective_from).sort((a,b)=> a.effective_from < b.effective_from ? -1 : 1);
+  sel.innerHTML = '<option value="__base__">Current rota</option>' +
+    sorted.map(s => '<option value="' + escapeHtml(s.effective_from) + '">From ' + escapeHtml(fmtDateLabel(s.effective_from)) + '</option>').join('');
+  sel.value = editingRotaVersion === null ? '__base__' : editingRotaVersion;
+  const delBtn = document.getElementById('rota-version-delete');
+  if(delBtn) delBtn.style.display = editingRotaVersion === null ? 'none' : 'inline-block';
+  const saveBtn = document.getElementById('save-rota-btn');
+  if(saveBtn) saveBtn.textContent = editingRotaVersion === null
+    ? 'Save my original rota'
+    : 'Save rota change (from ' + fmtDateLabel(editingRotaVersion) + ')';
+  const note = document.getElementById('rota-version-note');
+  if(note) note.textContent = editingRotaVersion === null
+    ? ''
+    : 'You\'re editing the rota that takes over from ' + fmtDateLabel(editingRotaVersion) + '. Days before it keep your current rota.';
+}
+
+function fmtDateLabel(d){
+  const dt = new Date(d + 'T00:00:00');
+  return isNaN(dt) ? d : dt.toLocaleDateString(undefined, { day:'numeric', month:'short', year:'numeric' });
+}
+
+function onRotaVersionChange(){
+  const val = document.getElementById('rota-version-select').value;
+  // Preserve whatever is currently in the editor back to its target before switching.
+  if(editingRotaVersion === null){ baseRota = snapshotEditorRota(); }
+  else { const cur = rotaSchedule.find(s => s.effective_from === editingRotaVersion); if(cur) Object.assign(cur, snapshotEditorRota()); }
+
+  if(val === '__base__'){
+    editingRotaVersion = null;
+    loadRotaIntoEditor(baseRota);
+  } else {
+    const v = rotaSchedule.find(s => s.effective_from === val);
+    if(v){ editingRotaVersion = val; loadRotaIntoEditor(v); }
   }
+  renderRotaVersionSelect();
+}
+
+function addScheduledRotaChange(){
+  const statusEl = document.getElementById('save-status');
+  const date = document.getElementById('rota-version-new-date').value;
+  if(!date){ statusEl.style.color='var(--danger)'; statusEl.textContent='Pick the date the new rota starts.'; return; }
+  // Stash current editor back to its target first
+  if(editingRotaVersion === null){ baseRota = snapshotEditorRota(); }
+  else { const cur = rotaSchedule.find(s => s.effective_from === editingRotaVersion); if(cur) Object.assign(cur, snapshotEditorRota()); }
+  // New version seeded from the current base rota so there's something to adjust
+  const seed = { effective_from: date, rota_start: baseRota.rota_start, weeks: baseRota.weeks, week_start_day: baseRota.week_start_day, pattern: [...baseRota.pattern] };
+  rotaSchedule = rotaSchedule.filter(s => s.effective_from !== date).concat([seed]);
+  editingRotaVersion = date;
+  loadRotaIntoEditor(seed);
+  renderRotaVersionSelect();
+  document.getElementById('rota-version-new-date').value = '';
+  statusEl.style.color = 'var(--text-dim)';
+  statusEl.textContent = 'New rota created from ' + fmtDateLabel(date) + ' (a copy of your current rota) — adjust it below, then press Save.';
+}
+
+async function deleteSelectedRotaVersion(){
+  if(editingRotaVersion === null) return;
+  if(!confirm('Delete the scheduled rota change from ' + fmtDateLabel(editingRotaVersion) + '? Your current rota is unaffected.')) return;
+  rotaSchedule = rotaSchedule.filter(s => s.effective_from !== editingRotaVersion);
+  editingRotaVersion = null;
+  loadRotaIntoEditor(baseRota);
+  renderRotaVersionSelect();
+  await persistRota(document.getElementById('save-status'), 'Scheduled change deleted.');
+}
+
+// Persist base rota (from baseRota) + schedule + pay. Used by save and delete.
+async function persistRota(statusEl, successMsg){
   statusEl.style.color = 'var(--text-dim)';
   statusEl.textContent = 'Saving…';
-  const { error } = await sb.from('rota_settings').upsert({
+  const payload = {
     user_id: currentUser.id,
-    rota_start: rotaStart,
-    weeks: weeks,
-    week_start_day: weekStartDay,
-    original_pattern: pattern,
+    rota_start: baseRota.rota_start,
+    weeks: baseRota.weeks,
+    week_start_day: baseRota.week_start_day,
+    original_pattern: baseRota.pattern,
     updated_at: new Date().toISOString()
-  });
+  };
+  if(rotaSchedule.length) payload.schedule = rotaSchedule;
+  const { error } = await sb.from('rota_settings').upsert(payload);
   if(error){
     statusEl.style.color = 'var(--danger)';
-    statusEl.textContent = error.message;
-    return;
+    statusEl.textContent = /schedule/i.test(error.message)
+      ? 'Scheduled changes need a one-off database update — run: alter table public.rota_settings add column if not exists schedule jsonb;'
+      : error.message;
+    return false;
   }
   const { error: payError } = await sb.from('pay_rates').upsert({
     user_id: currentUser.id,
@@ -2982,13 +3126,31 @@ async function saveOriginalRota(){
     sun: payRates.sun, mon: payRates.mon, tue: payRates.tue, wed: payRates.wed,
     thu: payRates.thu, fri: payRates.fri, sat: payRates.sat
   });
-  if(payError){
+  if(payError){ statusEl.style.color='var(--danger)'; statusEl.textContent=payError.message; return false; }
+  statusEl.style.color = 'var(--teal)';
+  statusEl.textContent = successMsg;
+  return true;
+}
+
+async function saveOriginalRota(){
+  const statusEl = document.getElementById('save-status');
+  if(!rotaStart){
     statusEl.style.color = 'var(--danger)';
-    statusEl.textContent = payError.message;
+    statusEl.textContent = 'Set a rota start date first.';
     return;
   }
-  statusEl.style.color = 'var(--teal)';
-  statusEl.textContent = 'Saved — this is your original rota.';
+  // Commit the editor into its target (base or the scheduled version).
+  if(editingRotaVersion === null){
+    baseRota = snapshotEditorRota();
+  } else {
+    const cur = rotaSchedule.find(s => s.effective_from === editingRotaVersion);
+    if(cur) Object.assign(cur, snapshotEditorRota());
+  }
+  const msg = editingRotaVersion === null
+    ? 'Saved — this is your current rota.'
+    : 'Saved — new rota takes over from ' + fmtDateLabel(editingRotaVersion) + '.';
+  await persistRota(statusEl, msg);
+  renderCalendarTab();
 }
 
 function escapeHtml(str){
