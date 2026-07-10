@@ -186,6 +186,11 @@
         <div id="tentative-list"></div>
       </section>
 
+      <section id="overtime-banner" style="display:none;">
+        <p class="sec-title" style="color:var(--amber);">Overtime to request soon</p>
+        <div id="overtime-list"></div>
+      </section>
+
       <section>
         <p class="sec-title">Change a day</p>
         <p class="help" style="margin-top:0;">Pick a date, then what it should become — a different shift, or a rest day.</p>
@@ -719,6 +724,7 @@ let editingRotaVersion = null;
 // Snapshot of the current (base) rota, authoritative while a scheduled version is loaded in the editor.
 let baseRota = { rota_start:'', weeks:5, week_start_day:0, pattern: Array(35).fill('') };
 let holidays = []; // override rows where value === '__holiday__'
+let overtimeRequests = new Set(); // date strings the user has flagged to request overtime
 let payRates = { enabled:false, sun:0, mon:0, tue:0, wed:0, thu:0, fri:0, sat:0 };
 let isAdmin = false;
 let isSignup = false;
@@ -983,10 +989,68 @@ function showDayDetail(dateStr){
     const originalLabel = originalId === '' ? 'Rest day' : (originalShift ? originalShift.name : 'original shift');
     revertBtn = '<button class="btn secondary full" style="margin-top:10px;" onclick="revertDayToOriginal(\'' + dateStr + '\')">Revert to original (' + escapeHtml(originalLabel) + ')</button>';
   }
-  panel.innerHTML = buildDayDetailHTML(dateStr, shift, shiftId, 'My — ') + revertBtn +
+  const hasOt = overtimeRequests.has(dateStr);
+  const otBtn = '<button class="btn secondary full" style="margin-top:10px;" onclick="toggleOvertime(\'' + dateStr + '\')">'
+    + (hasOt ? 'Cancel overtime request' : '💪 Request overtime this day') + '</button>';
+  panel.innerHTML = buildDayDetailHTML(dateStr, shift, shiftId, 'My — ')
+    + (hasOt ? '<p class="help" style="margin:8px 0 0;color:var(--amber);">Overtime requested for this day.</p>' : '')
+    + revertBtn + otBtn +
     '<button class="btn secondary full" style="margin-top:10px;" onclick="closeDayDetail()">Close</button>';
   panel.style.display = 'block';
   panel.scrollIntoView({behavior:'smooth', block:'center'});
+}
+
+async function loadOvertimeRequests(){
+  const { data, error } = await sb.from('overtime_requests').select('request_date').eq('user_id', currentUser.id);
+  overtimeRequests = new Set(error ? [] : (data || []).map(r => r.request_date));
+}
+
+async function toggleOvertime(dateStr){
+  const has = overtimeRequests.has(dateStr);
+  let error;
+  if(has){
+    ({ error } = await sb.from('overtime_requests').delete().eq('user_id', currentUser.id).eq('request_date', dateStr));
+    if(!error) overtimeRequests.delete(dateStr);
+  } else {
+    ({ error } = await sb.from('overtime_requests').insert({ user_id: currentUser.id, request_date: dateStr }));
+    if(!error) overtimeRequests.add(dateStr);
+  }
+  if(error){
+    alert(/relation|overtime_requests|does not exist/i.test(error.message)
+      ? 'Overtime needs a one-off database update — run the overtime_requests block from db-setup.sql.'
+      : error.message);
+    return;
+  }
+  renderOvertimeBanner();
+  renderCalendarTab();
+  showDayDetail(dateStr);
+}
+
+function renderOvertimeBanner(){
+  const banner = document.getElementById('overtime-banner');
+  const list = document.getElementById('overtime-list');
+  if(!banner || !list) return;
+  const today = new Date(); today.setHours(0,0,0,0);
+  const limit = new Date(today); limit.setDate(limit.getDate() + 21); // within 3 weeks
+  const soon = [...overtimeRequests].filter(d => {
+    const dt = new Date(d + 'T00:00:00');
+    return dt >= today && dt <= limit;
+  }).sort();
+  if(soon.length === 0){ banner.style.display = 'none'; return; }
+  banner.style.display = 'block';
+  list.innerHTML = '';
+  soon.forEach(d=>{
+    const dt = new Date(d + 'T00:00:00');
+    const div = document.createElement('div');
+    div.className = 'off-item';
+    div.innerHTML = '<span>💪 ' + escapeHtml(dt.toLocaleDateString(undefined, {weekday:'short', day:'numeric', month:'short'})) + ' — request overtime</span>';
+    const btn = document.createElement('button');
+    btn.textContent = 'Cancel';
+    btn.style.color = 'var(--danger)';
+    btn.onclick = ()=>toggleOvertime(d);
+    div.appendChild(btn);
+    list.appendChild(div);
+  });
 }
 
 async function revertDayToOriginal(dateStr){
@@ -1680,6 +1744,7 @@ async function loadAccountData(){
   rotaTemplates = allTpl.filter(t => t.category === '__rota__');
   allOverrides = ovRes.data || [];
   holidays = allOverrides.filter(o => o.value === '__holiday__');
+  await loadOvertimeRequests();
   isAdmin = (profileRes.data && profileRes.data.is_admin) || false;
   let myUsername = (profileRes.data && profileRes.data.username) || '';
   // Self-heal: if a username was chosen at signup (stored in auth metadata) but the
@@ -2746,6 +2811,7 @@ function rangeLabel(){
 
 function renderCalendarTab(){
   renderTentativeBanner();
+  renderOvertimeBanner();
   populateSwapToSelect();
   const listEl = document.getElementById('calendar-list');
   const gridEl = document.getElementById('calendar-grid');
@@ -2796,11 +2862,12 @@ function renderCalendarTab(){
         label += ' — <span class="cal-shift-name">' + escapeHtml(shift.name) + '</span>' + escapeHtml(shiftTimeLabel(shift));
         if(payRates.enabled) label += ' (£' + dayPay.toFixed(2) + ')';
       } else {
-        label += ' — —';
+        label += ' — <span class="cal-shift-name">RD</span>';
       }
       if(isBankHoliday) label += ' 🎉 Bank holiday';
       if(ov && (ov.source === 'self_swap' || ov.source === 'friend_swap')) label += ' ⇄ changed';
       if(ov && ov.tentative) label += ' ⏳';
+      if(overtimeRequests.has(key)) label += ' 💪 OT requested';
       row.style.cursor = 'pointer';
       row.onclick = ()=>showDayDetail(key);
       row.innerHTML = '<span>' + swatch + label + '</span>';
@@ -2840,9 +2907,10 @@ function renderCalendarTab(){
         cell.style.color = '#1B1E26';
         inner += '<span class="cal-grid-name">' + escapeHtml(shift.name) + '</span><span class="pay-line">' + escapeHtml(shiftTimeLabel(shift)) + (payRates.enabled ? ' £'+dayPay.toFixed(2) : '') + '</span>';
       } else {
-        inner += '<span class="pay-line">—</span>';
+        inner += '<span class="cal-grid-name">RD</span>';
       }
       if(ov && (ov.source === 'self_swap' || ov.source === 'friend_swap')) inner += '<span class="pay-line">⇄</span>';
+      if(overtimeRequests.has(key)) inner += '<span class="pay-line">💪 OT</span>';
       cell.innerHTML = inner;
       gridEl.appendChild(cell);
     }

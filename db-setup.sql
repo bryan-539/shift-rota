@@ -88,3 +88,18 @@ alter table public.pinned_users enable row level security;
 drop policy if exists "Users manage own pins" on public.pinned_users;
 create policy "Users manage own pins" on public.pinned_users
   for all using (user_id = auth.uid()) with check (user_id = auth.uid());
+
+-- ---------------------------------------------------------------------
+-- 5. Overtime requests (dates a user has flagged to request overtime)
+-- ---------------------------------------------------------------------
+create table if not exists public.overtime_requests (
+  user_id      uuid not null references auth.users(id) on delete cascade,
+  request_date date not null,
+  created_at   timestamptz default now(),
+  primary key (user_id, request_date)
+);
+alter table public.overtime_requests enable row level security;
+
+drop policy if exists "Users manage own overtime" on public.overtime_requests;
+create policy "Users manage own overtime" on public.overtime_requests
+  for all using (user_id = auth.uid()) with check (user_id = auth.uid());
