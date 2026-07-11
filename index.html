@@ -1244,6 +1244,14 @@ function formatDuration(mins){
   return h + ':' + String(m).padStart(2,'0');
 }
 
+// A leg that represents a break/meal relief rather than driving (e.g. the PDF
+// importer's "Break/As Req" rows, which come in as route "Break").
+function isBreakLeg(leg){
+  const s = ((leg && leg.route) || '') + ' ' + ((leg && leg.from) || '') + ' ' +
+            ((leg && leg.to) || '') + ' ' + ((leg && leg.notes) || '') + ' ' + ((leg && leg.extra) || '');
+  return /\bbreak\b/i.test(s) || /\bmeal\b/i.test(s) || /\bpnb\b/i.test(s);
+}
+
 // Pure builder: turns a legs array into the formatted duty-board lines.
 // A gap of 30+ minutes is a break — shown as a dashed line with its start/end,
 // total, and "BREAK", and it resets continuous driving toward the GB break rule.
@@ -1273,22 +1281,32 @@ function buildDutyBoardLines(legsInput){
   for(let i=0; i<timed.length; i++){
     const leg = timed[i];
     const legMinutes = leg.endAbs - leg.startAbs;
-    totalLegMinutes += legMinutes;
-    const fromTo = [leg.from, leg.to].filter(Boolean).join(' → ');
-    const label = [leg.route, fromTo || leg.notes].filter(Boolean).join(' · ');
-    let line = formatClock(leg.startAbs) + '–' + formatClock(leg.endAbs) + ' (' + formatDuration(legMinutes) + ')';
-    if(label) line += '  ' + label;
-    if(leg.extra) line += '  — ' + leg.extra;
-    lines.push(line);
-    lines.push(''); // blank line after each leg entry
 
-    continuousDriving += legMinutes;
-    if(continuousDriving >= CONTINUOUS_LIMIT) breakViolation = true;
+    if(isBreakLeg(leg)){
+      // An imported break leg — render it in the break view, not as a driving leg.
+      lines.push('---------- ' + formatClock(leg.startAbs) + '–' + formatClock(leg.endAbs)
+        + ' (' + formatDuration(legMinutes) + ') BREAK ----------');
+      lines.push('');
+      totalBreakMinutes += legMinutes;
+      continuousDriving = 0; // counts toward the GB driving-hours break
+    } else {
+      totalLegMinutes += legMinutes;
+      const fromTo = [leg.from, leg.to].filter(Boolean).join(' → ');
+      const label = [leg.route, fromTo || leg.notes].filter(Boolean).join(' · ');
+      let line = formatClock(leg.startAbs) + '–' + formatClock(leg.endAbs) + ' (' + formatDuration(legMinutes) + ')';
+      if(label) line += '  ' + label;
+      if(leg.extra) line += '  — ' + leg.extra;
+      lines.push(line);
+      lines.push(''); // blank line after each leg entry
+
+      continuousDriving += legMinutes;
+      if(continuousDriving >= CONTINUOUS_LIMIT) breakViolation = true;
+    }
 
     if(i < timed.length - 1){
       const gap = timed[i+1].startAbs - leg.endAbs;
       if(gap >= BREAK_THRESHOLD){
-        // A qualifying break — dashed line with times + total + BREAK.
+        // A qualifying gap between legs — dashed line with times + total + BREAK.
         lines.push('---------- ' + formatClock(leg.endAbs) + '–' + formatClock(timed[i+1].startAbs)
           + ' (' + formatDuration(gap) + ') BREAK ----------');
         lines.push('');
