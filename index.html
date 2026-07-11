@@ -1009,10 +1009,10 @@ function refreshOvertimeSet(){
 }
 
 async function ensureOvertimeShift(){
-  const existing = shiftTypes.find(st => (st.name || '').toLowerCase() === 'requested overtime');
+  const existing = shiftTypes.find(st => (st.name || '').toLowerCase().includes('requested overtime'));
   if(existing) return existing.id;
   const { data, error } = await sb.from('shift_types').insert({
-    owner_id: currentUser.id, is_template: false, name: 'Requested Overtime',
+    owner_id: currentUser.id, is_template: false, name: '💪 Requested Overtime',
     all_day: true, start_time: '', end_time: '', paid_hours: '', description: '',
     color: '#F2A93B', legs_data: null, allowed_days: null
   }).select().single();
