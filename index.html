@@ -61,6 +61,7 @@
   .leg-summary .gap-line{color:var(--amber);}
   .leg-summary .pass-line{color:var(--teal);}
   .leg-summary .warn-line{color:var(--danger);}
+  .leg-summary .caution-line{color:var(--amber);}
   .cmp-date{font-weight:600;color:var(--text);font-size:12px;margin-bottom:6px;}
   .cmp-cols{display:flex;gap:8px;}
   .cmp-cell{flex:1 1 0;min-width:0;background:rgba(0,0,0,0.14);border-radius:6px;padding:6px 8px;}
@@ -1244,6 +1245,14 @@ function formatDuration(mins){
   return h + ':' + String(m).padStart(2,'0');
 }
 
+// A leg that represents a break/meal relief rather than driving (e.g. the PDF
+// importer's "Break/As Req" rows, which come in as route "Break").
+function isBreakLeg(leg){
+  const s = ((leg && leg.route) || '') + ' ' + ((leg && leg.from) || '') + ' ' +
+            ((leg && leg.to) || '') + ' ' + ((leg && leg.notes) || '') + ' ' + ((leg && leg.extra) || '');
+  return /\bbreak\b/i.test(s) || /\bmeal\b/i.test(s) || /\bpnb\b/i.test(s);
+}
+
 // Pure builder: turns a legs array into the formatted duty-board lines.
 // A gap of 30+ minutes is a break — shown as a dashed line with its start/end,
 // total, and "BREAK", and it resets continuous driving toward the GB break rule.
@@ -1266,29 +1275,42 @@ function buildDutyBoardLines(legsInput){
   let totalLegMinutes = 0;
   const BREAK_THRESHOLD = 30;    // minimum gap (min) that counts as a qualifying break
   const CONTINUOUS_LIMIT = 330;  // 5h30m in minutes
+  const CAUTION_MARGIN = 15;     // warn when within this many minutes of a limit
   let continuousDriving = 0;
+  let maxContinuous = 0;         // longest continuous driving stretch reached
   let breakViolation = false;
   let totalBreakMinutes = 0;
 
   for(let i=0; i<timed.length; i++){
     const leg = timed[i];
     const legMinutes = leg.endAbs - leg.startAbs;
-    totalLegMinutes += legMinutes;
-    const fromTo = [leg.from, leg.to].filter(Boolean).join(' → ');
-    const label = [leg.route, fromTo || leg.notes].filter(Boolean).join(' · ');
-    let line = formatClock(leg.startAbs) + '–' + formatClock(leg.endAbs) + ' (' + formatDuration(legMinutes) + ')';
-    if(label) line += '  ' + label;
-    if(leg.extra) line += '  — ' + leg.extra;
-    lines.push(line);
-    lines.push(''); // blank line after each leg entry
 
-    continuousDriving += legMinutes;
-    if(continuousDriving >= CONTINUOUS_LIMIT) breakViolation = true;
+    if(isBreakLeg(leg)){
+      // An imported break leg — render it in the break view, not as a driving leg.
+      lines.push('---------- ' + formatClock(leg.startAbs) + '–' + formatClock(leg.endAbs)
+        + ' (' + formatDuration(legMinutes) + ') BREAK ----------');
+      lines.push('');
+      totalBreakMinutes += legMinutes;
+      continuousDriving = 0; // counts toward the GB driving-hours break
+    } else {
+      totalLegMinutes += legMinutes;
+      const fromTo = [leg.from, leg.to].filter(Boolean).join(' → ');
+      const label = [leg.route, fromTo || leg.notes].filter(Boolean).join(' · ');
+      let line = formatClock(leg.startAbs) + '–' + formatClock(leg.endAbs) + ' (' + formatDuration(legMinutes) + ')';
+      if(label) line += '  ' + label;
+      if(leg.extra) line += '  — ' + leg.extra;
+      lines.push(line);
+      lines.push(''); // blank line after each leg entry
+
+      continuousDriving += legMinutes;
+      if(continuousDriving >= CONTINUOUS_LIMIT) breakViolation = true;
+      maxContinuous = Math.max(maxContinuous, continuousDriving);
+    }
 
     if(i < timed.length - 1){
       const gap = timed[i+1].startAbs - leg.endAbs;
       if(gap >= BREAK_THRESHOLD){
-        // A qualifying break — dashed line with times + total + BREAK.
+        // A qualifying gap between legs — dashed line with times + total + BREAK.
         lines.push('---------- ' + formatClock(leg.endAbs) + '–' + formatClock(timed[i+1].startAbs)
           + ' (' + formatDuration(gap) + ') BREAK ----------');
         lines.push('');
@@ -1315,8 +1337,9 @@ function buildDutyBoardLines(legsInput){
   lines.push('');
 
   // GB Domestic Hours compliance (applies to local bus routes under 50 km)
-  const driveFail = totalLegMinutes > 10 * 60;
-  const spanFail = span > 16 * 60;
+  const DRIVE_LIMIT = 10 * 60, SPAN_LIMIT = 16 * 60;
+  const driveFail = totalLegMinutes > DRIVE_LIMIT;
+  const spanFail = span > SPAN_LIMIT;
   if(driveFail){
     lines.push('⚠️ Drive time exceeds 10hr daily limit');
   }
@@ -1326,7 +1349,22 @@ function buildDutyBoardLines(legsInput){
   if(breakViolation){
     lines.push('⚠️ No 30-min break by 5:30 continuous driving');
   }
-  if(!driveFail && !spanFail && !breakViolation){
+
+  // Cautions: within 15 minutes of a limit but not over it yet — keep an eye on it.
+  const driveCaution = !driveFail && totalLegMinutes >= DRIVE_LIMIT - CAUTION_MARGIN;
+  const spanCaution = !spanFail && span >= SPAN_LIMIT - CAUTION_MARGIN;
+  const contCaution = !breakViolation && maxContinuous >= CONTINUOUS_LIMIT - CAUTION_MARGIN;
+  if(driveCaution){
+    lines.push('⏰ Watch: drive time ' + formatDuration(totalLegMinutes) + ' — within 15 min of the 10hr limit');
+  }
+  if(spanCaution){
+    lines.push('⏰ Watch: span ' + formatDuration(span) + ' — within 15 min of the 16hr limit');
+  }
+  if(contCaution){
+    lines.push('⏰ Watch: ' + formatDuration(maxContinuous) + ' continuous driving — nearing the 5:30 break limit');
+  }
+
+  if(!driveFail && !spanFail && !breakViolation && !driveCaution && !spanCaution && !contCaution){
     lines.push('✅ Within GB domestic hours limits');
   }
 
@@ -1347,6 +1385,7 @@ function compileDutyBoard(prefix){
   // Re-render summary with highlighted lines
   summaryEl.innerHTML = lines.map(l => {
     if(l.startsWith('⚠️')) return '<span class="warn-line">' + escapeHtml(l) + '</span>';
+    if(l.startsWith('⏰')) return '<span class="caution-line">' + escapeHtml(l) + '</span>';
     if(l.startsWith('✅')) return '<span class="pass-line">' + escapeHtml(l) + '</span>';
     if(l.includes('BREAK') || l.startsWith('Gap (')) return '<span class="gap-line">' + escapeHtml(l) + '</span>';
     return escapeHtml(l);
