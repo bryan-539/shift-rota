@@ -193,6 +193,11 @@
         <p class="sub">Your original rota with any holidays and swaps already applied.</p>
       </header>
 
+      <section id="upcoming-banner" style="display:none;">
+        <p class="sec-title" style="color:var(--amber);">Coming up in the next 2 days</p>
+        <div id="upcoming-list"></div>
+      </section>
+
       <section id="tentative-banner" style="display:none;">
         <p class="sec-title" style="color:var(--amber);">Needs confirming with your workplace</p>
         <div id="tentative-list"></div>
@@ -3094,6 +3099,46 @@ function effectiveShift(dateStr){
   return patternShiftForDate(dateStr);
 }
 
+function isArShiftName(name){
+  return /^a\s*\/?\s*r$/i.test((name || '').trim());
+}
+
+// Surfaces A/R shifts, requested overtime, and unconfirmed shift changes that
+// fall within the next 2 days, so they don't get missed.
+function renderUpcomingBanner(){
+  const banner = document.getElementById('upcoming-banner');
+  const list = document.getElementById('upcoming-list');
+  if(!banner || !list || !rotaStart) return;
+  const today = new Date(); today.setHours(0,0,0,0);
+  const limit = new Date(today); limit.setDate(limit.getDate() + 2);
+  const items = [];
+  const cursor = new Date(today);
+  while(cursor <= limit){
+    const key = dateKeyLocal(cursor);
+    const shiftId = effectiveShift(key);
+    const shift = shiftTypes.find(s => s.id === shiftId);
+    const ov = allOverrides.find(o => o.override_date === key);
+    const reasons = [];
+    if(shift && isArShiftName(shift.name)) reasons.push('A/R shift');
+    if(ov && ov.source === 'overtime') reasons.push('Requested overtime');
+    if(ov && ov.tentative) reasons.push('Change not yet confirmed');
+    if(reasons.length) items.push({ date: new Date(cursor), key, reasons });
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  if(items.length === 0){ banner.style.display = 'none'; return; }
+  banner.style.display = 'block';
+  list.innerHTML = '';
+  items.forEach(item=>{
+    const div = document.createElement('div');
+    div.className = 'off-item';
+    div.style.cursor = 'pointer';
+    const formatted = item.date.toLocaleDateString(undefined, {weekday:'short', day:'numeric', month:'short'});
+    div.innerHTML = '<span>' + escapeHtml(formatted) + ' — <strong style="color:var(--text);">' + escapeHtml(item.reasons.join(', ')) + '</strong></span>';
+    div.onclick = ()=>showDayDetail(item.key);
+    list.appendChild(div);
+  });
+}
+
 function renderTentativeBanner(){
   const banner = document.getElementById('tentative-banner');
   const list = document.getElementById('tentative-list');
@@ -3147,6 +3192,7 @@ function rangeLabel(){
 }
 
 function renderCalendarTab(){
+  renderUpcomingBanner();
   renderTentativeBanner();
   renderOvertimeBanner();
   populateSwapToSelect();
