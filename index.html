@@ -126,13 +126,13 @@
   .income-row.total strong{color:var(--amber);font-size:15px;}
 
   /* Auth screen */
-  #auth-screen{max-width:380px;margin:60px auto 0;padding:0 16px;}
+  #auth-screen{max-width:380px;margin:calc(60px + env(safe-area-inset-top)) auto 0;padding:0 16px;}
   #auth-screen .toggle-row{display:flex;gap:8px;margin-top:14px;justify-content:center;font-size:13px;color:var(--text-dim);}
   #auth-screen .toggle-row a{color:var(--amber);cursor:pointer;text-decoration:underline;}
 
   /* Top nav */
   #app-screen{display:none;}
-  .topbar{display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid var(--border);}
+  .topbar{display:flex;align-items:center;justify-content:space-between;padding:14px 16px;padding-top:calc(14px + env(safe-area-inset-top));border-bottom:1px solid var(--border);}
   .topbar .brand{font-family:'Oswald',sans-serif;font-weight:600;letter-spacing:.05em;text-transform:uppercase;font-size:15px;}
   .topbar .email{font-size:12px;color:var(--text-dim);}
   .tabbar{display:flex;overflow-x:auto;border-bottom:1px solid var(--border);background:var(--surface);}
@@ -285,7 +285,7 @@
             <label>View</label>
             <select id="calendar-view-mode" onchange="renderCalendarTab()">
               <option value="list">List</option>
-              <option value="grid">Grid</option>
+              <option value="grid" selected>Grid</option>
             </select>
           </div>
         </div>
