@@ -229,7 +229,7 @@
       </section>
 
       <section>
-        <details class="collapsible-section">
+        <details class="collapsible-section" id="swap-details">
           <summary class="sec-title">Swap a shift</summary>
           <div style="margin-top:12px;">
             <p class="help" style="margin-top:0;">Pick a date, then what it should become — a different shift, or a rest day.</p>
@@ -1262,12 +1262,28 @@ function showDayDetail(dateStr){
   const hasOt = overtimeRequests.has(dateStr);
   const otBtn = '<button class="btn secondary full" style="margin-top:10px;" onclick="toggleOvertime(\'' + dateStr + '\')">'
     + (hasOt ? 'Cancel overtime request' : '💪 Request overtime this day') + '</button>';
+  const swapBtn = '<button class="btn secondary full" style="margin-top:10px;" onclick="startSwapFromDay(\'' + dateStr + '\')">⇄ Swap this shift</button>';
   panel.innerHTML = buildDayDetailHTML(dateStr, shift, shiftId, 'My — ')
     + (hasOt ? '<p class="help" style="margin:8px 0 0;color:var(--amber);">Overtime requested for this day.</p>' : '')
-    + revertBtn + otBtn +
+    + revertBtn + swapBtn + otBtn +
     '<button class="btn secondary full" style="margin-top:10px;" onclick="closeDayDetail()">Close</button>';
   panel.style.display = 'block';
   panel.scrollIntoView({behavior:'smooth', block:'center'});
+}
+
+// Jump from a day's detail panel straight into the normal "Swap a shift" flow,
+// pre-filled with that date — same shift picker + workplace-confirmation steps.
+function startSwapFromDay(dateStr){
+  closeDayDetail();
+  const details = document.getElementById('swap-details');
+  if(details) details.open = true;
+  document.getElementById('swap-from').value = dateStr;
+  document.getElementById('swap-shift-search').value = '';
+  document.getElementById('swap-to-shift').value = '';
+  document.getElementById('swap-confirm-box').style.display = 'none';
+  document.getElementById('swap-status').textContent = '';
+  revealSwapPicker();
+  if(details) details.scrollIntoView({behavior:'smooth', block:'start'});
 }
 
 // Overtime is stored as an override pointing at an all-day "Requested Overtime"
