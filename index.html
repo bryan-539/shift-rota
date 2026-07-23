@@ -1041,10 +1041,6 @@ function populateLocationFilter(){
 function renderPeopleList(){
   const el = document.getElementById('people-list');
   if(!el) return;
-  if(!isAdmin && !myCompany){
-    el.innerHTML = '<p class="empty">Join a company above to see your colleagues.</p>';
-    return;
-  }
   const term = (document.getElementById('people-search-input').value || '').trim().toLowerCase();
   const locFilter = (document.getElementById('location-filter') || {}).value || '__all__';
   let pool = scopedPool();
@@ -1054,23 +1050,38 @@ function renderPeopleList(){
     || (p.display_name || '').toLowerCase().includes(term)
     || (p.email || '').toLowerCase().includes(term);
   const visible = pool.filter(matches);
-  if(visible.length === 0){ el.innerHTML = '<p class="empty">No one matches.</p>'; return; }
+
+  // A full, exact username always finds someone — even outside your company —
+  // so you can star a colleague from elsewhere if you know their handle.
+  let exactMatch = null;
+  if(term){
+    exactMatch = allProfiles.find(p => (p.username || '').toLowerCase() === term && !visible.some(v => v.id === p.id));
+  }
+
+  if(visible.length === 0 && !exactMatch){
+    el.innerHTML = '<p class="empty">' + (!isAdmin && !myCompany
+      ? 'Join a company above to see your colleagues, or search a full username to find someone directly.'
+      : 'No one matches.') + '</p>';
+    return;
+  }
   const pinned = visible.filter(p => pinnedIds.has(p.id));
   const others = visible.filter(p => !pinnedIds.has(p.id));
   el.innerHTML = '';
-  const section = (title, list) => {
+  const section = (title, list, opts) => {
     if(list.length === 0) return;
     const head = document.createElement('p');
     head.className = 'people-subhead';
     head.textContent = title;
     el.appendChild(head);
-    list.forEach(p => el.appendChild(personRow(p)));
+    list.forEach(p => el.appendChild(personRow(p, opts)));
   };
   section('Starred', pinned);
   section(pinned.length ? 'Everyone else' : 'Everyone', others);
+  if(exactMatch) section('Found by exact username', [exactMatch], { forceCompanyTag: true });
 }
 
-function personRow(p){
+function personRow(p, opts){
+  opts = opts || {};
   const div = document.createElement('div');
   div.className = 'off-item';
   const left = document.createElement('div');
@@ -1085,8 +1096,9 @@ function personRow(p){
   name.className = 'name-text';
   name.textContent = friendLabel(p);
   left.appendChild(star); left.appendChild(name);
-  // Show location (and company for admins) as a muted tag
-  const meta = [isAdmin ? p.company : null, p.location].filter(Boolean).join(' · ');
+  // Show location (and company for admins, or when found via an exact
+  // cross-company username match) as a muted tag
+  const meta = [(isAdmin || opts.forceCompanyTag) ? p.company : null, p.location].filter(Boolean).join(' · ');
   if(meta){
     const tag = document.createElement('span');
     tag.style.cssText = 'color:var(--text-dim);font-size:11px;margin-left:8px;white-space:nowrap;';
