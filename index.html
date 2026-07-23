@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, viewport-fit=cover">
 <title>Shift Rota</title>
 <meta name="description" content="Your rota, holidays, pay and overtime — always up to date.">
-<meta name="theme-color" content="#1B1E26">
+<meta name="theme-color" content="#203143">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon-192.png">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
@@ -19,9 +19,9 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <style>
   :root{
-    --bg:#1B1E26; --surface:#242833; --surface-alt:#2D323F; --border:#3A3F4D;
-    --text:#F2EFE9; --text-dim:#9BA3B0; --amber:#F2A93B; --amber-dim:#6B5530;
-    --teal:#43C6AC; --danger:#E2574C;
+    --bg:#203143; --surface:#273C52; --surface-alt:#2E4660; --border:#375473;
+    --text:#F5F4EA; --text-dim:#929EAA; --amber:#C9C381; --amber-dim:#595636;
+    --teal:#84B847; --danger:#E2574C;
   }
   *{box-sizing:border-box;}
   body{margin:0;background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;-webkit-font-smoothing:antialiased;}
@@ -90,14 +90,14 @@
   input:focus, select:focus{outline:2px solid var(--amber);outline-offset:1px;}
   .row{display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;}
   .row > div{flex:1;min-width:90px;}
-  .btn{background:var(--amber);color:#1B1E26;border:none;border-radius:7px;padding:10px 16px;font-weight:600;font-size:14px;cursor:pointer;font-family:inherit;}
+  .btn{background:var(--amber);color:#203143;border:none;border-radius:7px;padding:10px 16px;font-weight:600;font-size:14px;cursor:pointer;font-family:inherit;}
   .btn:active{transform:translateY(1px);}
   .btn.secondary{background:transparent;color:var(--text);border:1px solid var(--border);}
   .btn.full{width:100%;}
-  .btn.danger{background:var(--danger);color:#1B1E26;}
+  .btn.danger{background:var(--danger);color:#203143;}
   .chip-list{display:flex;flex-wrap:wrap;gap:8px;margin-top:4px;}
-  .chip{display:flex;align-items:center;gap:8px;border-radius:7px;padding:7px 10px;font-size:13px;font-weight:600;color:#1B1E26;}
-  .chip button{background:rgba(0,0,0,.18);border:none;color:#1B1E26;width:18px;height:18px;border-radius:50%;cursor:pointer;font-size:12px;line-height:1;display:flex;align-items:center;justify-content:center;}
+  .chip{display:flex;align-items:center;gap:8px;border-radius:7px;padding:7px 10px;font-size:13px;font-weight:600;color:#203143;}
+  .chip button{background:rgba(0,0,0,.18);border:none;color:#203143;width:18px;height:18px;border-radius:50%;cursor:pointer;font-size:12px;line-height:1;display:flex;align-items:center;justify-content:center;}
   .checkbox-row{display:flex;align-items:center;gap:7px;margin-bottom:10px;}
   .checkbox-row input{width:auto;}
   .checkbox-row label{margin:0;color:var(--text);font-size:13px;}
@@ -3266,7 +3266,7 @@ function renderOriginalGrid(){
       const shift = shiftTypes.find(s=>s.id===shiftId);
       if(shift){
         cell.style.background = shift.color || '#F2A93B';
-        cell.style.color = '#1B1E26';
+        cell.style.color = '#203143';
         let inner = escapeHtml(shift.name);
         if(payRates.enabled){
           inner += '<span class="pay-line">£' + shiftPayPatternColumn(shift, d).toFixed(2) + '</span>';
@@ -3616,10 +3616,10 @@ function renderCalendarTab(){
       if(isHoliday){
         inner += '<span class="pay-line">Holiday</span>';
         cell.style.background = 'var(--teal)';
-        cell.style.color = '#1B1E26';
+        cell.style.color = '#203143';
       } else if(shift){
         cell.style.background = shift.color || '#F2A93B';
-        cell.style.color = '#1B1E26';
+        cell.style.color = '#203143';
         inner += '<span class="cal-grid-name">' + escapeHtml(shift.name) + '</span><span class="pay-line">' + escapeHtml(shiftTimeLabel(shift)) + (payRates.enabled ? ' £'+dayPay.toFixed(2) : '') + '</span>';
       } else {
         inner += '<span class="cal-grid-name">RD</span>';
@@ -3750,7 +3750,7 @@ function styleSelect(sel){
   const shift = shiftTypes.find(s=>s.id===sel.value);
   if(shift){
     sel.style.background = shift.color || '#F2A93B';
-    sel.style.color = '#1B1E26';
+    sel.style.color = '#203143';
     sel.style.border = 'none';
   } else {
     sel.style.background = 'var(--surface-alt)';
@@ -4250,7 +4250,7 @@ function renderRtplGrid(){
 
 function styleRtplSelect(sel){
   const t = templates.find(t=>t.id===sel.value);
-  if(t){ sel.style.background=t.color||'#43C6AC'; sel.style.color='#1B1E26'; sel.style.border='none'; }
+  if(t){ sel.style.background=t.color||'#43C6AC'; sel.style.color='#203143'; sel.style.border='none'; }
   else { sel.style.background='var(--surface-alt)'; sel.style.color='var(--text-dim)'; sel.style.border='1px solid var(--border)'; }
 }
 
@@ -4821,7 +4821,7 @@ function renderAdminRotaGrid(container){
         sel.appendChild(og);
       }
       sel.value=current;
-      const styleSel=()=>{ const sh=ar.shiftTypes.find(s=>s.id===sel.value); if(sh){sel.style.background=sh.color||'#F2A93B';sel.style.color='#1B1E26';sel.style.border='none';}else{sel.style.background='var(--surface-alt)';sel.style.color='var(--text-dim)';sel.style.border='1px solid var(--border)';} };
+      const styleSel=()=>{ const sh=ar.shiftTypes.find(s=>s.id===sel.value); if(sh){sel.style.background=sh.color||'#F2A93B';sel.style.color='#203143';sel.style.border='none';}else{sel.style.background='var(--surface-alt)';sel.style.color='var(--text-dim)';sel.style.border='1px solid var(--border)';} };
       styleSel();
       sel.addEventListener('change', async ()=>{
         if(sel.value.startsWith('tpl:')){
