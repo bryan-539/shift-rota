@@ -175,14 +175,16 @@
   <h1 id="auth-title">Log in</h1>
   <p class="sub" style="margin-bottom:16px;">Your rota, holidays and pay, saved to your account — open it from any device.</p>
   <section>
-    <div class="row"><div><label>Email</label><input type="email" id="auth-email" autocomplete="email"></div></div>
-    <div class="row" id="auth-username-row" style="display:none;"><div><label>Username</label><input type="text" id="auth-username" autocomplete="username" placeholder="e.g. chicken"></div></div>
-    <div class="row"><div><label>Password</label><input type="password" id="auth-password" autocomplete="current-password"></div></div>
-    <button class="btn full" id="auth-submit-btn" onclick="submitAuth()">Log in</button>
-    <div class="status" id="auth-status"></div>
-    <div class="toggle-row" id="auth-toggle">
-      Don't have an account? <a onclick="toggleAuthMode()">Sign up</a>
-    </div>
+    <form id="auth-form" autocomplete="on" onsubmit="submitAuth(event); return false;">
+      <div class="row"><div><label>Email</label><input type="email" id="auth-email" name="email" autocomplete="username"></div></div>
+      <div class="row" id="auth-username-row" style="display:none;"><div><label>Username</label><input type="text" id="auth-username" name="nickname" autocomplete="nickname" placeholder="e.g. chicken"></div></div>
+      <div class="row"><div><label>Password</label><input type="password" id="auth-password" name="password" autocomplete="current-password"></div></div>
+      <button class="btn full" id="auth-submit-btn" type="submit">Log in</button>
+      <div class="status" id="auth-status"></div>
+      <div class="toggle-row" id="auth-toggle">
+        Don't have an account? <a onclick="toggleAuthMode()">Sign up</a>
+      </div>
+    </form>
   </section>
 </div>
 
@@ -206,7 +208,8 @@
     <button class="tab-btn" data-tab="ratings" onclick="switchTab('ratings')">Ratings</button>
     <button class="tab-btn" data-tab="templates" onclick="switchTab('templates')">Templates</button>
     <button class="tab-btn" data-tab="admintemplates" id="admin-templates-tab-btn" style="display:none;" onclick="switchTab('admintemplates')">Admin Templates</button>
-    <button class="tab-btn" data-tab="account" onclick="switchTab('account')">Account &amp; Setup</button>
+    <button class="tab-btn" data-tab="account" onclick="switchTab('account')">Account</button>
+    <button class="tab-btn" data-tab="setup" onclick="switchTab('setup')">Setup</button>
     <button class="tab-btn" data-tab="admin" id="admin-tab-btn" style="display:none;" onclick="switchTab('admin')">Admin</button>
   </div>
 
@@ -308,7 +311,7 @@
       <header style="margin-bottom:16px;">
         <p class="eyebrow">Rota</p>
         <h1>Your contracted pattern</h1>
-        <p class="sub">This is your rota exactly as set up in Account &amp; Setup — no holidays or swaps applied.</p>
+        <p class="sub">This is your rota exactly as set up in Setup — no holidays or swaps applied.</p>
       </header>
 
       <section>
@@ -656,9 +659,9 @@ REST, IB15 1215-2058, IB15 1215-2058, IB18 1530-0138, IB16 1315-2138, IB16 1315-
 
     <div class="tab-panel" id="tab-account">
       <header style="margin-bottom:16px;">
-        <p class="eyebrow">Account &amp; Setup</p>
-        <h1>Your original rota</h1>
-        <p class="sub">Set this up once — it's the contracted pattern your workplace gave you, before any holidays or swaps. Only come back here if your whole contract changes.</p>
+        <p class="eyebrow">Account</p>
+        <h1>Your account</h1>
+        <p class="sub">Your username, navigation, and login details. For your rota, shifts and pay, see the Setup tab.</p>
       </header>
 
       <section>
@@ -691,6 +694,25 @@ REST, IB15 1215-2058, IB15 1215-2058, IB18 1530-0138, IB16 1315-2138, IB16 1315-
         <button class="btn secondary full" onclick="saveTopTabs()">Save tab layout</button>
         <div class="status" id="top-tabs-status"></div>
       </section>
+
+      <section>
+        <p class="sec-title">Change password</p>
+        <p class="help" style="margin-top:0;">Set a new password for logging in.</p>
+        <div class="row">
+          <div><label>New password</label><input type="password" id="new-password-input" autocomplete="new-password"></div>
+          <div><label>Confirm new password</label><input type="password" id="new-password-confirm" autocomplete="new-password"></div>
+        </div>
+        <button class="btn secondary full" onclick="changePassword()">Update password</button>
+        <div class="status" id="password-status"></div>
+      </section>
+    </div>
+
+    <div class="tab-panel" id="tab-setup">
+      <header style="margin-bottom:16px;">
+        <p class="eyebrow">Setup</p>
+        <h1>Your original rota</h1>
+        <p class="sub">Set this up once — it's the contracted pattern your workplace gave you, before any holidays or swaps. Only come back here if your whole contract changes.</p>
+      </header>
 
       <section>
         <p class="sec-title">1 · Your shift types</p>
@@ -1190,6 +1212,34 @@ async function saveUsername(){
   }
   statusEl.style.color = 'var(--teal)';
   statusEl.textContent = 'Saved.';
+}
+
+async function changePassword(){
+  const statusEl = document.getElementById('password-status');
+  const pw = document.getElementById('new-password-input').value;
+  const pwConfirm = document.getElementById('new-password-confirm').value;
+  if(!pw || pw.length < 6){
+    statusEl.style.color = 'var(--danger)';
+    statusEl.textContent = 'Password must be at least 6 characters.';
+    return;
+  }
+  if(pw !== pwConfirm){
+    statusEl.style.color = 'var(--danger)';
+    statusEl.textContent = "Passwords don't match.";
+    return;
+  }
+  statusEl.style.color = 'var(--text-dim)';
+  statusEl.textContent = 'Updating…';
+  const { error } = await sb.auth.updateUser({ password: pw });
+  if(error){
+    statusEl.style.color = 'var(--danger)';
+    statusEl.textContent = error.message;
+    return;
+  }
+  document.getElementById('new-password-input').value = '';
+  document.getElementById('new-password-confirm').value = '';
+  statusEl.style.color = 'var(--teal)';
+  statusEl.textContent = 'Password updated.';
 }
 
 
@@ -2182,13 +2232,15 @@ function toggleAuthMode(){
   document.getElementById('auth-title').textContent = isSignup ? 'Sign up' : 'Log in';
   document.getElementById('auth-submit-btn').textContent = isSignup ? 'Sign up' : 'Log in';
   document.getElementById('auth-username-row').style.display = isSignup ? 'flex' : 'none';
+  document.getElementById('auth-password').autocomplete = isSignup ? 'new-password' : 'current-password';
   document.getElementById('auth-toggle').innerHTML = isSignup
     ? 'Already have an account? <a onclick="toggleAuthMode()">Log in</a>'
     : "Don't have an account? <a onclick=\"toggleAuthMode()\">Sign up</a>";
   document.getElementById('auth-status').textContent = '';
 }
 
-async function submitAuth(){
+async function submitAuth(event){
+  if(event) event.preventDefault();
   const email = document.getElementById('auth-email').value.trim();
   const password = document.getElementById('auth-password').value;
   const statusEl = document.getElementById('auth-status');
@@ -2256,13 +2308,13 @@ async function checkExistingSession(){
 }
 
 // ---------- TABS ----------
-// Which 3 tabs sit in the top bar is user-configurable (Account & Setup); every
+// Which 3 tabs sit in the top bar is user-configurable (Account tab); every
 // other tab (including admin-only ones) lives in the ☰ menu.
 const DEFAULT_TOP_TABS = ['calendar', 'friends', 'holidays'];
-const CUSTOMIZABLE_TABS = ['calendar', 'friends', 'holidays', 'rota', 'ratings', 'templates', 'account'];
+const CUSTOMIZABLE_TABS = ['calendar', 'friends', 'holidays', 'rota', 'ratings', 'templates', 'account', 'setup'];
 const TAB_LABELS = {
   calendar: 'My Calendar', friends: 'People', holidays: 'Holidays',
-  rota: 'Rota', ratings: 'Ratings', templates: 'Templates', account: 'Account & Setup'
+  rota: 'Rota', ratings: 'Ratings', templates: 'Templates', account: 'Account', setup: 'Setup'
 };
 let topTabs = DEFAULT_TOP_TABS.slice();
 
@@ -3023,7 +3075,7 @@ function togglePaySection(){
 }
 
 // Quick, instant on/off for showing pay on My Calendar — mirrors "Track my pay"
-// in Account & Setup but saves immediately, without needing to press Save there.
+// in Setup but saves immediately, without needing to press Save there.
 async function toggleQuickPay(){
   const checkbox = document.getElementById('quick-pay-toggle');
   const on = checkbox.checked;
@@ -3534,7 +3586,7 @@ function renderCalendarTab(){
   const incomeEl = document.getElementById('calendar-income');
   if(!listEl) return;
   if(!rotaStart){
-    listEl.innerHTML = '<p class="empty">Set up your original rota in Account &amp; Setup first.</p>';
+    listEl.innerHTML = '<p class="empty">Set up your original rota in Setup first.</p>';
     gridEl.innerHTML = '';
     incomeEl.innerHTML = '';
     return;
@@ -4365,7 +4417,7 @@ async function applyRotaTemplate(rtpl){
   populateAnchorWeekSelect();
   document.getElementById('rota-anchor-week').value = '1';
   renderShiftTypeList(); renderGrid(); renderOriginalGrid(); renderCalendarTab();
-  switchTab('account');
+  switchTab('setup');
 }
 
 function renderRotaTemplateList(){
