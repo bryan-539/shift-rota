@@ -1,6 +1,6 @@
 // Shift Rota service worker — makes the app installable and works offline for
 // the app shell. Supabase / CDN requests are left to the network.
-const CACHE = 'shift-rota-v2';
+const CACHE = 'shift-rota-v3';
 const SHELL = [
   './',
   './index.html',
