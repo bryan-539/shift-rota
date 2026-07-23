@@ -22,7 +22,9 @@ Why: `index.html` is sometimes edited directly on github.com (commits titled
 behind and conflict. Syncing first avoids surprise merge conflicts at PR time.
 
 ## Conventions
-- Develop on the designated feature branch, commit, push, open a PR, then merge to `main`.
+- Develop on the designated feature branch, commit, push, open a PR, then merge to `main`
+  automatically — don't wait for the user to say "merge", just do it once the change is
+  pushed and verified (syntax-checked). Still summarize what shipped afterward.
 - After editing the inline `<script>`, sanity-check JS syntax with `node --check` on the extracted script.
 - Two importers already exist on the Templates page (admin only): "Import duty sheets
   from PDF" (per-duty) and "Import a full rota" (multi-week). Don't remove either.
